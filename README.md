@@ -15,6 +15,10 @@ Switch between macOS apps with a 3-finger trackpad swipe, iPad-style. A lightwei
 
 The ring's order is persistent: it only re-sorts (most-recently-used first) when you switch apps some other way — Dock, Cmd-Tab, a click — or an app launches or quits. That's what makes "one swipe right, one swipe left" reliably toggle between two apps.
 
+## No trackpad? (clamshell mode)
+
+Hold **⌥ Option and scroll** on a Magic Mouse: horizontal swipes glide the ring exactly like the trackpad gesture, a downward swipe opens the music HUD, and those scrolls never reach the page behind. Classic wheel mice work too (⌥ + wheel steps the ring). The modifier is configurable (⌥/⌘/⌃) and the feature can be disabled in Settings → Gesture. Both HUDs are fully mouse-operable once open — click an icon to jump, click the music controls, hover to pin.
+
 ## Setup (one-time)
 
 Both items live in the Settings window's **Status** section, with buttons that open the right System Settings panes:

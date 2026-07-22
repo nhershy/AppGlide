@@ -17,6 +17,8 @@ enum PrefKey {
     static let excludedBundleIDs = "excludedBundleIDs"
     static let musicHUDEnabled = "musicHUDEnabled"
     static let musicHudDuration = "musicHudDuration"
+    static let mouseScrollEnabled = "mouseScrollEnabled"
+    static let mouseScrollModifier = "mouseScrollModifier"
     static let hasShownSetup = "hasShownSetup"
     static let loginItemPath = "loginItemRegisteredPath"
 }
@@ -83,6 +85,12 @@ final class GestureMonitor {
         #endif
 
         guard let direction = recognizer.consume(frame) else { return }
+        dispatch(direction)
+    }
+
+    /// Shared routing for every input source (trackpad recognizer, mouse
+    /// scroll): applies the pause/music/invert prefs in exactly one place.
+    func dispatch(_ direction: SwipeDirection) {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: PrefKey.isPaused) else { return }
 

@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var gestureMonitor: GestureMonitor?
     private var musicController: MusicController?
     private var musicOverlay: MusicOverlay?
+    private var mouseScrollMonitor: MouseScrollMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let defaults = UserDefaults.standard
@@ -35,9 +36,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         musicOverlay = overlay
         monitor.onMusicGesture = { [weak overlay] in overlay?.toggle() }
         monitor.start()
+
+        let mouse = MouseScrollMonitor(gestureMonitor: monitor)
+        mouseScrollMonitor = mouse
+        mouse.start()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Idempotent retry: recovers the scroll tap if Accessibility was
+        // granted after launch.
+        mouseScrollMonitor?.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        mouseScrollMonitor?.stop()
         gestureMonitor?.stop()
     }
 

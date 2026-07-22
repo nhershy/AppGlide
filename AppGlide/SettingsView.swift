@@ -38,6 +38,8 @@ struct SettingsView: View {
     @AppStorage(PrefKey.hapticsEnabled) private var hapticsEnabled = true
     @AppStorage(PrefKey.musicHUDEnabled) private var musicHUDEnabled = true
     @AppStorage(PrefKey.musicHudDuration) private var musicHudDuration = 2.0
+    @AppStorage(PrefKey.mouseScrollEnabled) private var mouseScrollEnabled = true
+    @AppStorage(PrefKey.mouseScrollModifier) private var mouseScrollModifier = MouseScrollModifier.option.rawValue
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var status = SetupStatus.check()
 
@@ -62,6 +64,15 @@ struct SettingsView: View {
             Section("Gesture") {
                 Toggle("Invert swipe direction", isOn: $reverseDirection)
                 Toggle("Haptic feedback on each step", isOn: $hapticsEnabled)
+                Toggle("Hold modifier + scroll to glide (for Magic Mouse)", isOn: $mouseScrollEnabled)
+                if mouseScrollEnabled {
+                    Picker("Modifier", selection: $mouseScrollModifier) {
+                        Text("⌥ Option").tag(MouseScrollModifier.option.rawValue)
+                        Text("⌘ Command").tag(MouseScrollModifier.command.rawValue)
+                        Text("⌃ Control").tag(MouseScrollModifier.control.rawValue)
+                    }
+                    .pickerStyle(.segmented)
+                }
                 DistanceSlider(
                     title: "Swipe distance",
                     subtitle: "Travel needed for the first switch — shorter is more sensitive",
