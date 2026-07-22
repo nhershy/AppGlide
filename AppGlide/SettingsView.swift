@@ -35,12 +35,14 @@ struct SettingsView: View {
     @AppStorage(PrefKey.swipeDistance) private var swipeDistance = 0.08
     @AppStorage(PrefKey.glideStepDistance) private var glideStepDistance = 0.10
     @AppStorage(PrefKey.hudDuration) private var hudDuration = 1.5
+    @AppStorage(PrefKey.hapticsEnabled) private var hapticsEnabled = true
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         Form {
             Section("Gesture") {
-                Toggle("Reverse swipe direction", isOn: $reverseDirection)
+                Toggle("Invert swipe direction", isOn: $reverseDirection)
+                Toggle("Haptic feedback on each step", isOn: $hapticsEnabled)
                 DistanceSlider(
                     title: "Swipe distance",
                     subtitle: "Travel needed for the first switch — shorter is more sensitive",

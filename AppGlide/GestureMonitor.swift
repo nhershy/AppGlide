@@ -13,6 +13,7 @@ enum PrefKey {
     static let swipeDistance = "swipeDistance"
     static let glideStepDistance = "glideStepDistance"
     static let hudDuration = "hudDuration"
+    static let hapticsEnabled = "hapticsEnabled"
 }
 
 /// What to do with apps whose windows are all minimized.

@@ -14,7 +14,7 @@ struct MenuBarView: View {
 
     var body: some View {
         Toggle("Pause Switching", isOn: $isPaused)
-        Toggle("Reverse Swipe Direction", isOn: $reverseDirection)
+        Toggle("Invert Swipe Direction", isOn: $reverseDirection)
         Divider()
         Picker("Minimized Apps", selection: $minimizedBehavior) {
             Text("Unminimize on Switch").tag(MinimizedAppBehavior.restore.rawValue)

@@ -228,15 +228,15 @@ private struct SwitcherHUDView: View {
         .padding(.top, 3)
         .padding(.bottom, 10)
         .background(HUDBackground())
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(alignment: .topTrailing) {
+        .clipShape(RoundedRectangle(cornerRadius: 36))
+        .overlay(alignment: .bottomTrailing) {
             Button(action: onSettings) {
                 Image(systemName: "gearshape.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white.opacity(0.5))
             }
             .buttonStyle(.plain)
-            .padding(6)
+            .padding(16)
         }
         .onHover(perform: onHover)
     }

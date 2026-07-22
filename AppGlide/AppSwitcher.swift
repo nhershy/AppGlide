@@ -86,7 +86,9 @@ final class AppSwitcher: NSObject {
         s.index = target
         session = s
         overlay.show(apps: s.apps, selectedIndex: s.index)
-        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+        if UserDefaults.standard.object(forKey: PrefKey.hapticsEnabled) as? Bool ?? true {
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+        }
 
         let now = clock.now
         let isRapidGlide = lastSwipeAt.map { now - $0 < Constants.rapidSwipeWindow } ?? false
