@@ -279,16 +279,24 @@ private struct MusicHUDView: View {
         Group {
             switch model.state {
             case .notRunning:
-                placeholder(icon: "music.note.slash", text: "Music isn't running") {
-                    Button("Open Music") { controller.openMusic() }
+                placeholder(
+                    icon: "music.note.slash",
+                    title: "Music isn't running",
+                    caption: "Open it to control playback"
+                ) {
+                    PillButton("Open Music") { controller.openMusic() }
                 }
             case .permissionDenied:
-                placeholder(icon: "exclamationmark.triangle.fill", text: "Allow AppGlide to control Music") {
+                placeholder(
+                    icon: "exclamationmark.triangle.fill",
+                    title: "Allow AppGlide to control Music",
+                    actionsBelow: true
+                ) {
                     HStack(spacing: 8) {
-                        Button("Try Again") {
+                        PillButton("Try Again") {
                             _ = controller.ensureAutomationPermission()
                         }
-                        Button("Settings") {
+                        PillButton("Settings") {
                             NSWorkspace.shared.open(
                                 URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
                             )
@@ -311,23 +319,49 @@ private struct MusicHUDView: View {
         .onHover(perform: onHover)
     }
 
-    private func placeholder(icon: String, text: String, @ViewBuilder action: () -> some View) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(text)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
+    /// Empty-state banner: icon medallion, title/caption, and actions either
+    /// trailing (single button) or stacked under the title (button pairs,
+    /// which would otherwise crowd the title out of the fixed width).
+    private func placeholder(
+        icon: String,
+        title: String,
+        caption: String? = nil,
+        actionsBelow: Bool = false,
+        @ViewBuilder action: () -> some View
+    ) -> some View {
+        HStack(spacing: 16) {
+            ZStack {
+                Circle().fill(.white.opacity(0.08))
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .frame(width: 56, height: 56)
+            VStack(alignment: .leading, spacing: actionsBelow ? 8 : 3) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.95))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
+                if let caption {
+                    Text(caption)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                if actionsBelow {
+                    action()
+                        .fixedSize()
+                }
+            }
+            Spacer(minLength: 12)
+            if !actionsBelow {
                 action()
                     .fixedSize()
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 24)
     }
 
     private func player(now: NowPlaying?) -> some View {
@@ -521,6 +555,43 @@ private struct MusicHUDView: View {
     private func timeString(_ seconds: Double) -> String {
         let total = Int(seconds.rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// Capsule action button for the placeholder states: translucent fill that
+/// brightens on hover, matching the HUD's styling.
+private struct PillButton: View {
+    let title: String
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(.white.opacity(hovering ? 1 : 0.9))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(.white.opacity(hovering ? 0.22 : 0.13)))
+                .overlay(Capsule().strokeBorder(.white.opacity(0.1), lineWidth: 1))
+                .contentShape(Capsule())
+                .animation(.easeOut(duration: 0.12), value: hovering)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering in
+            hovering = isHovering
+            if isHovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
     }
 }
 
