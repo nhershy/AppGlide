@@ -45,8 +45,16 @@ final class SwitcherOverlay {
                 panel.setFrame(NSRect(origin: origin, size: size), display: true)
             }
         }
-        panel.alphaValue = 1
-        panel.orderFrontRegardless()
+        if panel.isVisible, panel.alphaValue > 0 {
+            panel.orderFrontRegardless()
+        } else {
+            panel.alphaValue = 0
+            panel.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.12
+                panel.animator().alphaValue = 1
+            }
+        }
 
         hideTask?.cancel()
         hideTask = Task { [weak self, autoHideDelay] in
@@ -59,7 +67,17 @@ final class SwitcherOverlay {
     func hide() {
         hideTask?.cancel()
         hideTask = nil
-        panel?.orderOut(nil)
+        guard let panel, panel.isVisible, panel.alphaValue > 0 else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.45
+            panel.animator().alphaValue = 0
+        } completionHandler: {
+            // A show() during the fade restores alpha to 1; only dismiss if
+            // the fade actually ran to completion.
+            if panel.alphaValue == 0 {
+                panel.orderOut(nil)
+            }
+        }
     }
 
     private func ensurePanel(rootView: SwitcherHUDView) -> NSPanel {
@@ -98,10 +116,11 @@ private struct HUDEntry: Identifiable {
 /// 3D ring carousel: apps sit on a circle viewed from the front. The focused
 /// app is at the front of the ring — full size, full opacity — and the others
 /// recede around it, shrinking, dimming, rising slightly, and layering behind
-/// as they approach the back. Slot +1 is the next-older app, slot -1 the
-/// next-newer; a swipe rotates the ring so the new selection comes around to
-/// the front, moving with the fingers. The ring's seam is at the back, where
-/// icons are smallest, so wrap-around is visually seamless.
+/// as they approach the back. Slot -1 (left) is the next-older app, slot +1
+/// (right) the next-newer; a swipe rotates the ring so the new selection comes
+/// around to the front, moving with the fingers (swipe right = older app
+/// arrives from the left). The ring's seam is at the back, where icons are
+/// smallest, so wrap-around is visually seamless.
 private struct SwitcherHUDView: View {
     let entries: [HUDEntry]  // frozen session order, [0] = most recent
     let selectedIndex: Int   // always a valid index into entries
@@ -115,7 +134,7 @@ private struct SwitcherHUDView: View {
         let n = entries.count
         let half = (n - 1) / 2
         return (-half...(n - 1 - half)).map { r in
-            (r, entries[((selectedIndex + r) % n + n) % n])
+            (r, entries[((selectedIndex - r) % n + n) % n])
         }
     }
 

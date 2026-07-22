@@ -14,6 +14,10 @@ import ApplicationServices
 final class AppSwitcher: NSObject {
     private enum Constants {
         static let overlayHideDelay: Duration = .seconds(1.5)
+        /// A swipe this soon after the previous one is part of a glide, so its
+        /// activation is deferred until the user settles.
+        static let rapidSwipeWindow: Duration = .milliseconds(350)
+        static let settleDelay: Duration = .milliseconds(250)
     }
 
     private struct Session {
@@ -29,6 +33,9 @@ final class AppSwitcher: NSObject {
     /// notification doesn't kill the live session; any other activation
     /// (Dock, Cmd-Tab, click) must end it.
     private var pendingActivationPID: pid_t?
+    private var lastSwipeAt: ContinuousClock.Instant?
+    private var commitTask: Task<Void, Never>?
+    private let clock = ContinuousClock()
 
     override init() {
         super.init()
@@ -53,6 +60,11 @@ final class AppSwitcher: NSObject {
     }
 
     /// step: +1 = older in MRU, -1 = newer. Wraps around at the ends.
+    ///
+    /// Commit-on-settle: an isolated swipe activates its target immediately,
+    /// but further swipes in quick succession only move the cursor and HUD —
+    /// the selection activates once the user pauses, so a multi-step glide
+    /// raises one app instead of every app passed along the way.
     func handleSwipe(step: Int) {
         pendingActivationPID = nil
         if session == nil {
@@ -67,12 +79,39 @@ final class AppSwitcher: NSObject {
         } else {
             target = ((s.index + step) % count + count) % count
         }
-        if !s.apps[target].isTerminated {
-            s.index = target
-            activate(s.apps[target])
+        guard !s.apps[target].isTerminated else {
+            session = s
+            return
         }
+        s.index = target
         session = s
         overlay.show(apps: s.apps, selectedIndex: s.index)
+        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+
+        let now = clock.now
+        let isRapidGlide = lastSwipeAt.map { now - $0 < Constants.rapidSwipeWindow } ?? false
+        lastSwipeAt = now
+        commitTask?.cancel()
+        if isRapidGlide {
+            commitTask = Task { [weak self] in
+                try? await Task.sleep(for: Constants.settleDelay)
+                guard !Task.isCancelled else { return }
+                self?.commitSelection()
+            }
+        } else {
+            commitSelection()
+        }
+    }
+
+    private func commitSelection() {
+        commitTask = nil
+        guard let s = session, s.apps.indices.contains(s.index) else { return }
+        let app = s.apps[s.index]
+        guard !app.isTerminated,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier else {
+            return
+        }
+        activate(app)
     }
 
     // MARK: - Workspace notifications
@@ -85,8 +124,11 @@ final class AppSwitcher: NSObject {
         if pid == pendingActivationPID {
             pendingActivationPID = nil
         } else {
-            // User switched apps some other way (Dock, Cmd-Tab, click).
+            // User switched apps some other way (Dock, Cmd-Tab, click); a
+            // pending glide commit must not override their choice.
             session = nil
+            commitTask?.cancel()
+            commitTask = nil
             overlay.hide()
         }
     }
@@ -96,6 +138,8 @@ final class AppSwitcher: NSObject {
         mruPIDs.removeAll { $0 == app.processIdentifier }
         // The strip contains a dead app now; rebuild it on the next swipe.
         session = nil
+        commitTask?.cancel()
+        commitTask = nil
         overlay.hide()
     }
 

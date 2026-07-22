@@ -68,8 +68,8 @@ final class GestureMonitor {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: PrefKey.isPaused) else { return }
 
-        // Swipe left → older app (step +1), swipe right → newer (step -1).
-        var step = direction == .left ? 1 : -1
+        // Swipe right → previous/older app (step +1), swipe left → newer (step -1).
+        var step = direction == .right ? 1 : -1
         if defaults.bool(forKey: PrefKey.reverseDirection) {
             step = -step
         }

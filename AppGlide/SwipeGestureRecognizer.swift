@@ -10,10 +10,13 @@ enum SwipeDirection {
     case right
 }
 
-/// Detects a 3-finger horizontal swipe from raw multitouch frames.
+/// Detects 3-finger horizontal swipe steps from raw multitouch frames.
 ///
-/// Fires at most once per physical gesture: after firing (or failing), the
-/// recognizer stays inert until every touch lifts off the trackpad.
+/// A gesture fires its first step after `fireThreshold` of travel, then keeps
+/// firing — one step per additional `continuationThreshold` of travel — for as
+/// long as the fingers stay down, so a long glide scrubs across several apps.
+/// Reversing direction mid-glide steps back. Failing (vertical motion, extra
+/// fingers) latches the recognizer inert until every touch lifts.
 ///
 /// Tracking starts at 2 fingers and keeps accumulating through brief 2-finger
 /// phases so the staggered landing and lift-off of a fast flick still count
@@ -23,8 +26,10 @@ enum SwipeDirection {
 struct SwipeGestureRecognizer {
     enum Constants {
         static let requiredFingers = 3
-        /// Horizontal travel needed to fire, as a fraction of trackpad width.
+        /// Travel needed for the first step, as a fraction of trackpad width.
         static let fireThreshold: Float = 0.08
+        /// Additional travel per subsequent step while fingers stay down.
+        static let continuationThreshold: Float = 0.10
         /// |accX| must exceed this multiple of |accY| for the motion to count as horizontal.
         static let dominanceRatio: Float = 1.5
         /// Vertical travel beyond which a non-dominant gesture is abandoned.
@@ -38,7 +43,6 @@ struct SwipeGestureRecognizer {
     private enum State {
         case idle
         case tracking
-        case fired
         case failed
     }
 
@@ -49,6 +53,7 @@ struct SwipeGestureRecognizer {
     private var prevMeanY: Float = 0
     private var prevCount = 0
     private var sawRequiredFingers = false
+    private var hasFired = false
     private var trackingStart: ContinuousClock.Instant?
     private var graceDeadline: ContinuousClock.Instant?
     private let clock = ContinuousClock()
@@ -133,13 +138,21 @@ struct SwipeGestureRecognizer {
             if abs(accY) > Constants.verticalAbort,
                abs(accX) <= Constants.dominanceRatio * abs(accY) {
                 state = .failed
-            } else if abs(accX) >= Constants.fireThreshold,
-                      abs(accX) > Constants.dominanceRatio * abs(accY) {
-                state = .fired
-                return accX < 0 ? .left : .right
+            } else {
+                let threshold = hasFired ? Constants.continuationThreshold : Constants.fireThreshold
+                if abs(accX) >= threshold,
+                   abs(accX) > Constants.dominanceRatio * abs(accY) {
+                    let direction: SwipeDirection = accX < 0 ? .left : .right
+                    // Keep the remainder so detents stay evenly spaced during
+                    // a continuous glide; verticality is judged per segment.
+                    accX += accX < 0 ? threshold : -threshold
+                    accY = 0
+                    hasFired = true
+                    return direction
+                }
             }
 
-        case .fired, .failed:
+        case .failed:
             break
         }
         return nil
