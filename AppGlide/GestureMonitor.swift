@@ -93,6 +93,10 @@ final class GestureMonitor {
     func dispatch(_ direction: SwipeDirection) {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: PrefKey.isPaused) else { return }
+        // While Mission Control is up, every gesture belongs to it — most
+        // importantly the swipe-down that dismisses it must not open the
+        // music HUD.
+        guard !MissionControlDetector.isActive() else { return }
 
         if direction == .peek {
             switcher.peek()
