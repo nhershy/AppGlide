@@ -14,6 +14,15 @@ enum PrefKey {
     static let glideStepDistance = "glideStepDistance"
     static let hudDuration = "hudDuration"
     static let hapticsEnabled = "hapticsEnabled"
+    static let excludedBundleIDs = "excludedBundleIDs"
+    static let hasShownSetup = "hasShownSetup"
+    static let loginItemPath = "loginItemRegisteredPath"
+}
+
+extension Notification.Name {
+    /// Posted by SettingsView when the excluded-apps set changes; AppSwitcher
+    /// invalidates the live session so the ring drops the app immediately.
+    static let appGlideExclusionsChanged = Notification.Name("appGlideExclusionsChanged")
 }
 
 /// What to do with apps whose windows are all minimized.

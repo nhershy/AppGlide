@@ -55,10 +55,25 @@ final class AppSwitcher: NSObject {
             name: NSWorkspace.didTerminateApplicationNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(exclusionsDidChange),
+            name: .appGlideExclusionsChanged,
+            object: nil
+        )
     }
 
     deinit {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func exclusionsDidChange() {
+        // Rebuild the ring on the next swipe so exclusions apply immediately.
+        session = nil
+        commitTask?.cancel()
+        commitTask = nil
+        overlay.hide()
     }
 
     /// step: +1 = older in MRU, -1 = newer. Wraps around at the ends.
@@ -191,6 +206,7 @@ final class AppSwitcher: NSObject {
         // permission; without it, fall back to the over-inclusive CG filter.
         let axTrusted = AXIsProcessTrusted()
         let skipMinimized = MinimizedAppBehavior.current() == .skip
+        let excluded = Set(UserDefaults.standard.stringArray(forKey: PrefKey.excludedBundleIDs) ?? [])
         let windowPIDs = axTrusted ? [] : Self.pidsOwningWindows()
         let byPID = Dictionary(
             NSWorkspace.shared.runningApplications.map { ($0.processIdentifier, $0) },
@@ -201,6 +217,7 @@ final class AppSwitcher: NSObject {
             $0.activationPolicy == .regular
                 && !$0.isTerminated
                 && $0.processIdentifier != ownPID
+                && !excluded.contains($0.bundleIdentifier ?? "")
                 && (axTrusted
                         ? Self.axHasWindows($0.processIdentifier, skippingMinimizedOnly: skipMinimized)
                         : windowPIDs.contains($0.processIdentifier))
