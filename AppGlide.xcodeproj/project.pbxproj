@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AB12CD34EF5601AB23CD45E3 /* OpenMultitouchSupport in Frameworks */ = {isa = PBXBuildFile; productRef = AB12CD34EF5601AB23CD45E2 /* OpenMultitouchSupport */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		6BD30D0F301031270085751A /* AppGlide.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppGlide.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AB12CD34EF5601AB23CD45E3 /* OpenMultitouchSupport in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = AppGlide;
 			packageProductDependencies = (
+				AB12CD34EF5601AB23CD45E2 /* OpenMultitouchSupport */,
 			);
 			productName = AppGlide;
 			productReference = 6BD30D0F301031270085751A /* AppGlide.app */;
@@ -94,6 +100,9 @@
 			);
 			mainGroup = 6BD30D06301031270085751A;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AB12CD34EF5601AB23CD45E1 /* XCRemoteSwiftPackageReference "OpenMultitouchSupport" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6BD30D10301031270085751A /* Products */;
 			projectDirPath = "";
@@ -254,11 +263,12 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 9AZ9MMS68X;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -286,11 +296,12 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 9AZ9MMS68X;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -331,6 +342,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AB12CD34EF5601AB23CD45E1 /* XCRemoteSwiftPackageReference "OpenMultitouchSupport" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Kyome22/OpenMultitouchSupport";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AB12CD34EF5601AB23CD45E2 /* OpenMultitouchSupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AB12CD34EF5601AB23CD45E1 /* XCRemoteSwiftPackageReference "OpenMultitouchSupport" */;
+			productName = OpenMultitouchSupport;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 6BD30D07301031270085751A /* Project object */;
 }

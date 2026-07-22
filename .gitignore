@@ -1,0 +1,10 @@
+# Build products (local xcodebuild -derivedDataPath)
+build/
+DerivedData/
+
+# Per-user Xcode state
+xcuserdata/
+*.xcuserstate
+
+# macOS
+.DS_Store

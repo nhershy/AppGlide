@@ -9,9 +9,11 @@ import SwiftUI
 
 @main
 struct AppGlideApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        MenuBarExtra("AppGlide", systemImage: "hand.draw") {
+            MenuBarView()
         }
     }
 }
