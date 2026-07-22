@@ -39,6 +39,7 @@ final class AppSwitcher: NSObject {
 
     override init() {
         super.init()
+        overlay.onSelectApp = { [weak self] pid in self?.jumpToApp(pid) }
         seedMRU()
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(
@@ -103,6 +104,23 @@ final class AppSwitcher: NSObject {
         } else {
             commitSelection()
         }
+    }
+
+    /// HUD icon clicked: move the cursor straight to that app and activate it.
+    private func jumpToApp(_ pid: pid_t) {
+        guard var s = session,
+              let index = s.apps.firstIndex(where: { $0.processIdentifier == pid }) else { return }
+        commitTask?.cancel()
+        commitTask = nil
+        s.index = index
+        session = s
+        overlay.show(apps: s.apps, selectedIndex: index)
+        if UserDefaults.standard.object(forKey: PrefKey.hapticsEnabled) as? Bool ?? true {
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+        }
+        let app = s.apps[index]
+        guard !app.isTerminated else { return }
+        activate(app)
     }
 
     private func commitSelection() {

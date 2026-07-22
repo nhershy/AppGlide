@@ -17,6 +17,9 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
 /// app being switched to. Hovering the mouse over it pins it open; a gear
 /// button in its corner opens the settings window.
 final class SwitcherOverlay {
+    /// Called with the pid of an icon the user clicks in the HUD.
+    var onSelectApp: ((pid_t) -> Void)?
+
     private var panel: NSPanel?
     private var hostingView: NSHostingView<SwitcherHUDView>?
     private var hideTask: Task<Void, Never>?
@@ -43,7 +46,8 @@ final class SwitcherOverlay {
             entries: entries,
             selectedIndex: clampedIndex,
             onHover: { [weak self] hovering in self?.hoverChanged(hovering) },
-            onSettings: { [weak self] in self?.openSettings() }
+            onSettings: { [weak self] in self?.openSettings() },
+            onSelect: { [weak self] pid in self?.onSelectApp?(pid) }
         )
 
         let panel = ensurePanel(rootView: root)
@@ -174,11 +178,13 @@ private struct SwitcherHUDView: View {
     let selectedIndex: Int   // always a valid index into entries
     let onHover: (Bool) -> Void
     let onSettings: () -> Void
+    let onSelect: (pid_t) -> Void
 
     private static let baseIconSize: CGFloat = 48
-    private static let frontSpacing: CGFloat = 60  // spacing between front neighbors
+    private static let frontSpacing: CGFloat = 60  // ring-chord spacing between adjacent slots
+    private static let frontNeighborGap: CGFloat = 52  // min horizontal gap, front icon to its neighbors
     private static let minRadius: CGFloat = 64
-    private static let verticalDepth: CGFloat = 20
+    private static let verticalDepth: CGFloat = 36
 
     private var slots: [(offset: Int, entry: HUDEntry)] {
         let n = entries.count
@@ -190,7 +196,13 @@ private struct SwitcherHUDView: View {
 
     var body: some View {
         let n = entries.count
-        let radius = max(Self.frontSpacing / (2 * sin(.pi / CGFloat(n))), Self.minRadius)
+        // With few apps the adjacent-chord formula collapses the ring until
+        // front icons overlap; also require the front neighbors' horizontal
+        // projection to clear the focused icon.
+        let adjacentRadius = Self.frontSpacing / (2 * sin(.pi / CGFloat(n)))
+        let neighborProjection = sin(2 * .pi / CGFloat(n))
+        let neighborRadius = neighborProjection > 0.1 ? Self.frontNeighborGap / neighborProjection : 0
+        let radius = max(adjacentRadius, neighborRadius, Self.minRadius)
         let width = 2 * radius + Self.baseIconSize + 36
         let height = Self.baseIconSize * 1.2 + Self.verticalDepth + 10
         let centerX = width / 2
@@ -201,12 +213,29 @@ private struct SwitcherHUDView: View {
                 ForEach(slots, id: \.entry.id) { slot in
                     let theta = 2 * CGFloat.pi * CGFloat(slot.offset) / CGFloat(n)
                     let depth = (cos(theta) + 1) / 2  // 1 = front, 0 = back
+                    // The high exponent concentrates size on the front slot so
+                    // the focused app clearly outranks its neighbors, while
+                    // the floor keeps the back row legible.
+                    let emphasis = pow(depth, 2.5)
                     Image(nsImage: slot.entry.icon)
                         .resizable()
                         .frame(width: Self.baseIconSize, height: Self.baseIconSize)
-                        .scaleEffect(0.66 + 0.49 * depth)
+                        .background {
+                            if slot.offset == 0 {
+                                Circle()
+                                    .fill(.white.opacity(0.28))
+                                    .frame(
+                                        width: Self.baseIconSize * 1.5,
+                                        height: Self.baseIconSize * 1.5
+                                    )
+                                    .blur(radius: 14)
+                            }
+                        }
+                        .scaleEffect(0.66 + 0.64 * emphasis)
                         .shadow(color: .black.opacity(0.4 * depth), radius: 6, y: 3)
                         .opacity(0.68 + 0.32 * depth)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onSelect(slot.entry.id) }
                         .position(
                             x: centerX + sin(theta) * radius,
                             y: centerY - (1 - depth) * Self.verticalDepth
@@ -229,6 +258,10 @@ private struct SwitcherHUDView: View {
         .padding(.bottom, 10)
         .background(HUDBackground())
         .clipShape(RoundedRectangle(cornerRadius: 36))
+        .overlay {
+            RoundedRectangle(cornerRadius: 36)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        }
         .overlay(alignment: .bottomTrailing) {
             Button(action: onSettings) {
                 Image(systemName: "gearshape.fill")
