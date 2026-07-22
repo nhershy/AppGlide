@@ -21,8 +21,9 @@ final class AppSwitcher: NSObject {
     }
 
     private struct Session {
-        /// Frozen MRU snapshot, [0] = most recent. Never re-reads mruPIDs.
-        let apps: [NSRunningApplication]
+        /// Frozen MRU snapshot, [0] = most recent. Never re-reads mruPIDs;
+        /// only a HUD click reorders it (jumpToApp).
+        var apps: [NSRunningApplication]
         var index: Int
     }
 
@@ -106,19 +107,26 @@ final class AppSwitcher: NSObject {
         }
     }
 
-    /// HUD icon clicked: move the cursor straight to that app and activate it.
+    /// HUD icon clicked: instead of rotating the whole ring to the clicked
+    /// app, pull it out of its slot and insert it beside the currently focused
+    /// app, then focus it — so the rest of the ring barely moves.
     private func jumpToApp(_ pid: pid_t) {
         guard var s = session,
-              let index = s.apps.firstIndex(where: { $0.processIdentifier == pid }) else { return }
+              let clicked = s.apps.firstIndex(where: { $0.processIdentifier == pid }) else { return }
         commitTask?.cancel()
         commitTask = nil
-        s.index = index
+        if clicked != s.index {
+            let app = s.apps.remove(at: clicked)
+            let insertAt = clicked > s.index ? s.index : s.index - 1
+            s.apps.insert(app, at: insertAt)
+            s.index = insertAt
+        }
         session = s
-        overlay.show(apps: s.apps, selectedIndex: index)
+        overlay.show(apps: s.apps, selectedIndex: s.index)
         if UserDefaults.standard.object(forKey: PrefKey.hapticsEnabled) as? Bool ?? true {
             NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         }
-        let app = s.apps[index]
+        let app = s.apps[s.index]
         guard !app.isTerminated else { return }
         activate(app)
     }
