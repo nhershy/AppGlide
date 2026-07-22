@@ -76,9 +76,6 @@ final class MouseScrollMonitor {
     private var consumeMomentum = false
     private var lastMatchedAt: ContinuousClock.Instant?
     private let clock = ContinuousClock()
-    #if DEBUG
-    private var didLogSampleEvent = false
-    #endif
 
     init(gestureMonitor: GestureMonitor) {
         self.gestureMonitor = gestureMonitor
@@ -97,7 +94,7 @@ final class MouseScrollMonitor {
         ) else {
             // Active taps need Accessibility; the Settings Status row is the
             // recovery path.
-            NSLog("AppGlide: mouse scroll tap creation failed (Accessibility missing?)")
+            AppLog.log("mouse scroll tap creation failed (Accessibility missing?)")
             return
         }
         tap = port
@@ -181,17 +178,6 @@ final class MouseScrollMonitor {
                 * Constants.legacyLineMultiplier * Constants.wheelSignForOlder
             musicDelta = 0
         }
-        #if DEBUG
-        if !didLogSampleEvent {
-            didLogSampleEvent = true
-            NSLog(
-                "AppGlide scroll sample: continuous=%d rawY=%.1f rawX=%.1f (expect +X fingers-right, +Y fingers-down with natural scrolling ON)",
-                continuous ? 1 : 0,
-                event.getDoubleValueField(continuous ? .scrollWheelEventPointDeltaAxis1 : .scrollWheelEventFixedPtDeltaAxis1),
-                event.getDoubleValueField(continuous ? .scrollWheelEventPointDeltaAxis2 : .scrollWheelEventFixedPtDeltaAxis2)
-            )
-        }
-        #endif
 
         accRing += ringDelta
         accMusic += musicDelta

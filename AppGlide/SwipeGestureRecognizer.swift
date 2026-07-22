@@ -174,9 +174,6 @@ struct SwipeGestureRecognizer {
                 // upward (or diagonal mush) belongs to Mission Control — fail
                 // silently. Either way latch .failed so neither horizontal
                 // steps nor a second .down can fire until every touch lifts.
-                #if DEBUG
-                NSLog("AppGlide: vertical accY=%.3f (expect negative for swipe DOWN)", accY)
-                #endif
                 let firesDown = !hasFired
                     && Constants.downwardYSign * accY >= Constants.downThreshold
                     && abs(accY) > Constants.dominanceRatio * abs(accX)

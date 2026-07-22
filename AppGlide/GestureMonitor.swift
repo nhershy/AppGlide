@@ -48,9 +48,6 @@ final class GestureMonitor {
     private let switcher: AppSwitcher
     private var recognizer = SwipeGestureRecognizer()
     private var task: Task<Void, Never>?
-    #if DEBUG
-    private var didLogSampleFrame = false
-    #endif
 
     init(switcher: AppSwitcher) {
         self.switcher = switcher
@@ -59,7 +56,7 @@ final class GestureMonitor {
     func start() {
         guard task == nil else { return }
         if !OMSManager.shared.startListening() {
-            NSLog("AppGlide: failed to start multitouch listener")
+            AppLog.log("failed to start multitouch listener")
         }
         task = Task { [weak self] in
             for await frame in OMSManager.shared.touchDataStream {
@@ -76,13 +73,6 @@ final class GestureMonitor {
     }
 
     private func handle(_ frame: [OMSTouchData]) {
-        #if DEBUG
-        if !didLogSampleFrame, frame.count >= 3 {
-            didLogSampleFrame = true
-            NSLog("AppGlide sample frame: \(frame.map(\.description).joined(separator: " | "))")
-        }
-        #endif
-
         guard let direction = recognizer.consume(frame) else { return }
         dispatch(direction)
     }
@@ -112,9 +102,6 @@ final class GestureMonitor {
         if defaults.bool(forKey: PrefKey.reverseDirection) {
             step = -step
         }
-        #if DEBUG
-        NSLog("AppGlide: swipe \(direction) -> step \(step)")
-        #endif
         switcher.handleSwipe(step: step)
     }
 }
