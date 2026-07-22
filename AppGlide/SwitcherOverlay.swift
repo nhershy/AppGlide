@@ -6,13 +6,21 @@
 import AppKit
 import SwiftUI
 
-/// Bottom-of-screen HUD legend: one icon per app in the swipe session, with the
-/// current selection highlighted. The panel is non-activating and click-through,
-/// so it never steals focus from the app being switched to.
+/// Accepts the first click even though the panel never becomes key, so the
+/// HUD's gear button responds to a single tap.
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// Bottom-of-screen HUD showing the app ring, with the current selection front
+/// and center. The panel is non-activating, so it never steals focus from the
+/// app being switched to. Hovering the mouse over it pins it open; a gear
+/// button in its corner opens the settings window.
 final class SwitcherOverlay {
     private var panel: NSPanel?
     private var hostingView: NSHostingView<SwitcherHUDView>?
     private var hideTask: Task<Void, Never>?
+    private var isHovering = false
     private let autoHideDelay: Duration
 
     init(autoHideDelay: Duration) {
@@ -31,7 +39,12 @@ final class SwitcherOverlay {
         }
         guard !entries.isEmpty else { return }
         let clampedIndex = min(max(selectedIndex, 0), entries.count - 1)
-        let root = SwitcherHUDView(entries: entries, selectedIndex: clampedIndex)
+        let root = SwitcherHUDView(
+            entries: entries,
+            selectedIndex: clampedIndex,
+            onHover: { [weak self] hovering in self?.hoverChanged(hovering) },
+            onSettings: { [weak self] in self?.openSettings() }
+        )
 
         let panel = ensurePanel(rootView: root)
         if let hostingView {
@@ -45,6 +58,7 @@ final class SwitcherOverlay {
                 panel.setFrame(NSRect(origin: origin, size: size), display: true)
             }
         }
+
         if panel.isVisible, panel.alphaValue > 0 {
             panel.orderFrontRegardless()
         } else {
@@ -56,17 +70,18 @@ final class SwitcherOverlay {
             }
         }
 
-        hideTask?.cancel()
-        hideTask = Task { [weak self, autoHideDelay] in
-            try? await Task.sleep(for: autoHideDelay)
-            guard !Task.isCancelled else { return }
-            self?.hide()
+        if isHovering {
+            hideTask?.cancel()
+            hideTask = nil
+        } else {
+            scheduleAutoHide()
         }
     }
 
     func hide() {
         hideTask?.cancel()
         hideTask = nil
+        isHovering = false
         guard let panel, panel.isVisible, panel.alphaValue > 0 else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.45
@@ -80,12 +95,45 @@ final class SwitcherOverlay {
         }
     }
 
+    private func scheduleAutoHide() {
+        hideTask?.cancel()
+        let stored = UserDefaults.standard.double(forKey: PrefKey.hudDuration)
+        let delay: Duration = stored > 0 ? .seconds(stored) : autoHideDelay
+        hideTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self?.hide()
+        }
+    }
+
+    private func hoverChanged(_ hovering: Bool) {
+        isHovering = hovering
+        if hovering {
+            hideTask?.cancel()
+            hideTask = nil
+            // Interrupt an in-flight fade-out so the HUD revives under the cursor.
+            if let panel, panel.isVisible {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.1
+                    panel.animator().alphaValue = 1
+                }
+            }
+        } else if let panel, panel.isVisible, panel.alphaValue > 0 {
+            scheduleAutoHide()
+        }
+    }
+
+    private func openSettings() {
+        hide()
+        SettingsWindowController.shared.show()
+    }
+
     private func ensurePanel(rootView: SwitcherHUDView) -> NSPanel {
         if let panel, let hostingView {
             hostingView.rootView = rootView
             return panel
         }
-        let hosting = NSHostingView(rootView: rootView)
+        let hosting = FirstMouseHostingView(rootView: rootView)
         let panel = NSPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -97,7 +145,7 @@ final class SwitcherOverlay {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.ignoresMouseEvents = true
+        panel.ignoresMouseEvents = false
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.contentView = hosting
@@ -124,6 +172,8 @@ private struct HUDEntry: Identifiable {
 private struct SwitcherHUDView: View {
     let entries: [HUDEntry]  // frozen session order, [0] = most recent
     let selectedIndex: Int   // always a valid index into entries
+    let onHover: (Bool) -> Void
+    let onSettings: () -> Void
 
     private static let baseIconSize: CGFloat = 48
     private static let frontSpacing: CGFloat = 60  // spacing between front neighbors
@@ -179,6 +229,16 @@ private struct SwitcherHUDView: View {
         .padding(.bottom, 10)
         .background(HUDBackground())
         .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(alignment: .topTrailing) {
+            Button(action: onSettings) {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+            .buttonStyle(.plain)
+            .padding(6)
+        }
+        .onHover(perform: onHover)
     }
 }
 

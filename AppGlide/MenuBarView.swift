@@ -35,6 +35,9 @@ struct MenuBarView: View {
                 }
             }
         Divider()
+        Button("Settings…") {
+            SettingsWindowController.shared.show()
+        }
         Button("Quit AppGlide") {
             NSApp.terminate(nil)
         }

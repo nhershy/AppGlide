@@ -10,6 +10,9 @@ enum PrefKey {
     static let isPaused = "isPaused"
     static let reverseDirection = "reverseDirection"
     static let minimizedAppBehavior = "minimizedAppBehavior"
+    static let swipeDistance = "swipeDistance"
+    static let glideStepDistance = "glideStepDistance"
+    static let hudDuration = "hudDuration"
 }
 
 /// What to do with apps whose windows are all minimized.

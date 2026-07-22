@@ -3,6 +3,7 @@
 //  AppGlide
 //
 
+import Foundation
 import OpenMultitouchSupport
 
 enum SwipeDirection {
@@ -57,6 +58,17 @@ struct SwipeGestureRecognizer {
     private var trackingStart: ContinuousClock.Instant?
     private var graceDeadline: ContinuousClock.Instant?
     private let clock = ContinuousClock()
+
+    /// User-tunable thresholds (Settings window); Constants hold the defaults.
+    private var firstStepDistance: Float {
+        let value = UserDefaults.standard.double(forKey: PrefKey.swipeDistance)
+        return value > 0 ? Float(value) : Constants.fireThreshold
+    }
+
+    private var glideStepDistance: Float {
+        let value = UserDefaults.standard.double(forKey: PrefKey.glideStepDistance)
+        return value > 0 ? Float(value) : Constants.continuationThreshold
+    }
 
     mutating func consume(_ frame: [OMSTouchData]) -> SwipeDirection? {
         let active = frame.filter { $0.state == .touching || $0.state == .making }
@@ -139,7 +151,7 @@ struct SwipeGestureRecognizer {
                abs(accX) <= Constants.dominanceRatio * abs(accY) {
                 state = .failed
             } else {
-                let threshold = hasFired ? Constants.continuationThreshold : Constants.fireThreshold
+                let threshold = hasFired ? glideStepDistance : firstStepDistance
                 if abs(accX) >= threshold,
                    abs(accX) > Constants.dominanceRatio * abs(accY) {
                     let direction: SwipeDirection = accX < 0 ? .left : .right
