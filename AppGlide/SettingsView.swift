@@ -41,6 +41,7 @@ struct SettingsView: View {
     @AppStorage(PrefKey.mouseScrollModifier) private var mouseScrollModifier = MouseScrollModifier.option.rawValue
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var status = SetupStatus.check()
+    @State private var exclusionRows: [ExclusionRow] = []
 
     var body: some View {
         Form {
@@ -51,13 +52,6 @@ struct SettingsView: View {
                     problemText: "Accessibility needed for accurate window detection",
                     buttonTitle: "Open Accessibility Settings",
                     url: SetupStatus.accessibilitySettingsURL
-                )
-                StatusRow(
-                    ok: status.gestureFree,
-                    okText: "3-finger swipe is free for AppGlide",
-                    problemText: "macOS also uses 3-finger swipes — set app switching to four fingers",
-                    buttonTitle: "Open Trackpad Settings",
-                    url: SetupStatus.trackpadSettingsURL
                 )
             }
             Section("Gesture") {
@@ -92,9 +86,6 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.radioGroup)
             }
-            Section("Excluded Apps") {
-                ExcludedAppsList()
-            }
             Section("HUD") {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Stays visible for \(hudDuration, format: .number.precision(.fractionLength(1))) s")
@@ -119,13 +110,72 @@ struct SettingsView: View {
                         }
                     }
             }
+            Section("Excluded Apps") {
+                ForEach(exclusionRows) { row in
+                    HStack {
+                        if let icon = row.icon {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .frame(width: 16, height: 16)
+                        } else {
+                            Image(systemName: "app.dashed")
+                                .frame(width: 16, height: 16)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(row.name)
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { row.isExcluded },
+                            set: { setExcluded(row.id, $0) }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: 440, height: 700)
-        .onAppear { status = SetupStatus.check() }
+        .onAppear {
+            status = SetupStatus.check()
+            loadExclusions()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             status = SetupStatus.check()
+            loadExclusions()
         }
+    }
+
+    private func loadExclusions() {
+        let excluded = Set(UserDefaults.standard.stringArray(forKey: PrefKey.excludedBundleIDs) ?? [])
+        var seen = Set<String>()
+        var running: [ExclusionRow] = []
+        for app in NSWorkspace.shared.runningApplications
+        where app.activationPolicy == .regular {
+            guard let bundleID = app.bundleIdentifier, seen.insert(bundleID).inserted else { continue }
+            running.append(ExclusionRow(
+                id: bundleID,
+                name: app.localizedName ?? bundleID,
+                icon: app.icon,
+                isExcluded: excluded.contains(bundleID)
+            ))
+        }
+        running.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        // Keep excluded-but-not-running apps visible so they can be un-excluded.
+        let leftovers = excluded.subtracting(seen).sorted().map {
+            ExclusionRow(id: $0, name: $0, icon: nil, isExcluded: true)
+        }
+        exclusionRows = running + leftovers
+    }
+
+    private func setExcluded(_ bundleID: String, _ excluded: Bool) {
+        guard let index = exclusionRows.firstIndex(where: { $0.id == bundleID }) else { return }
+        exclusionRows[index].isExcluded = excluded
+        UserDefaults.standard.set(
+            exclusionRows.filter(\.isExcluded).map(\.id),
+            forKey: PrefKey.excludedBundleIDs
+        )
+        NotificationCenter.default.post(name: .appGlideExclusionsChanged, object: nil)
     }
 }
 
@@ -158,70 +208,6 @@ private struct ExclusionRow: Identifiable {
     var isExcluded: Bool
 }
 
-private struct ExcludedAppsList: View {
-    @State private var rows: [ExclusionRow] = []
-
-    var body: some View {
-        List(rows) { row in
-            HStack {
-                if let icon = row.icon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .frame(width: 16, height: 16)
-                } else {
-                    Image(systemName: "app.dashed")
-                        .frame(width: 16, height: 16)
-                        .foregroundStyle(.secondary)
-                }
-                Text(row.name)
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { row.isExcluded },
-                    set: { setExcluded(row.id, $0) }
-                ))
-                .labelsHidden()
-                .toggleStyle(.checkbox)
-            }
-        }
-        .frame(height: 140)
-        .onAppear { load() }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-            load()
-        }
-    }
-
-    private func load() {
-        let excluded = Set(UserDefaults.standard.stringArray(forKey: PrefKey.excludedBundleIDs) ?? [])
-        var seen = Set<String>()
-        var running: [ExclusionRow] = []
-        for app in NSWorkspace.shared.runningApplications
-        where app.activationPolicy == .regular {
-            guard let bundleID = app.bundleIdentifier, seen.insert(bundleID).inserted else { continue }
-            running.append(ExclusionRow(
-                id: bundleID,
-                name: app.localizedName ?? bundleID,
-                icon: app.icon,
-                isExcluded: excluded.contains(bundleID)
-            ))
-        }
-        running.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        // Keep excluded-but-not-running apps visible so they can be un-excluded.
-        let leftovers = excluded.subtracting(seen).sorted().map {
-            ExclusionRow(id: $0, name: $0, icon: nil, isExcluded: true)
-        }
-        rows = running + leftovers
-    }
-
-    private func setExcluded(_ bundleID: String, _ excluded: Bool) {
-        guard let index = rows.firstIndex(where: { $0.id == bundleID }) else { return }
-        rows[index].isExcluded = excluded
-        UserDefaults.standard.set(
-            rows.filter(\.isExcluded).map(\.id),
-            forKey: PrefKey.excludedBundleIDs
-        )
-        NotificationCenter.default.post(name: .appGlideExclusionsChanged, object: nil)
-    }
-}
 
 private struct DistanceSlider: View {
     let title: String
