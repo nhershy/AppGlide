@@ -76,6 +76,17 @@ final class AppSwitcher: NSObject {
         overlay.hide()
     }
 
+    /// Show the ring at its current state without stepping — fired when
+    /// 3 fingers rest on the trackpad. Repeated peeks while the fingers stay
+    /// down keep extending the HUD's auto-hide.
+    func peek() {
+        if session == nil {
+            session = makeSession()
+        }
+        guard let s = session else { return }
+        overlay.show(apps: s.apps, selectedIndex: s.index)
+    }
+
     /// step: +1 = older in MRU, -1 = newer. Wraps around at the ends.
     ///
     /// Commit-on-settle: an isolated swipe activates its target immediately,

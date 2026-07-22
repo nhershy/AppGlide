@@ -94,6 +94,10 @@ final class GestureMonitor {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: PrefKey.isPaused) else { return }
 
+        if direction == .peek {
+            switcher.peek()
+            return
+        }
         if direction == .down {
             guard defaults.object(forKey: PrefKey.musicHUDEnabled) as? Bool ?? true else { return }
             onMusicGesture?()

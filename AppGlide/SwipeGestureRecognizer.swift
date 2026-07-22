@@ -10,6 +10,9 @@ enum SwipeDirection {
     case left
     case right
     case down
+    /// Not a swipe: 3 fingers resting on the pad — show the carousel without
+    /// stepping, so the user can see the ring before gliding.
+    case peek
 }
 
 /// Detects 3-finger horizontal swipe steps from raw multitouch frames.
@@ -46,6 +49,12 @@ struct SwipeGestureRecognizer {
         /// the longest a 2-finger lead-in still counts as a staggered landing
         /// rather than a scroll.
         static let fingerGrace: Duration = .milliseconds(120)
+        /// 3 fingers resting this long fires .peek. Zero = the first frame
+        /// they're all down (a 3-finger tap will flash the HUD; accepted).
+        static let peekDelay: Duration = .zero
+        /// While fingers stay down, .peek repeats at this cadence so the HUD's
+        /// auto-hide keeps getting extended for the duration of the hold.
+        static let peekRepeat: Duration = .milliseconds(500)
     }
 
     private enum State {
@@ -64,6 +73,8 @@ struct SwipeGestureRecognizer {
     private var hasFired = false
     private var trackingStart: ContinuousClock.Instant?
     private var graceDeadline: ContinuousClock.Instant?
+    private var threeFingersSince: ContinuousClock.Instant?
+    private var lastPeekAt: ContinuousClock.Instant?
     private let clock = ContinuousClock()
 
     /// User-tunable thresholds (Settings window); Constants hold the defaults.
@@ -154,6 +165,9 @@ struct SwipeGestureRecognizer {
             prevCount = count
 
             guard sawRequiredFingers else { return nil }
+            if count == Constants.requiredFingers {
+                threeFingersSince = threeFingersSince ?? clock.now
+            }
             if abs(accY) > Constants.verticalAbort,
                abs(accX) <= Constants.dominanceRatio * abs(accY) {
                 // Vertical gesture. Downward-dominant fires .down once;
@@ -179,6 +193,15 @@ struct SwipeGestureRecognizer {
                     accY = 0
                     hasFired = true
                     return direction
+                }
+                // No step this frame: 3 fingers resting past the dwell shows
+                // the carousel (and keeps it alive for the duration of the hold).
+                if count == Constants.requiredFingers,
+                   let since = threeFingersSince,
+                   clock.now - since >= Constants.peekDelay,
+                   lastPeekAt.map({ clock.now - $0 >= Constants.peekRepeat }) ?? true {
+                    lastPeekAt = clock.now
+                    return .peek
                 }
             }
 
