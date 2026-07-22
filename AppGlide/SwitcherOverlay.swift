@@ -217,6 +217,8 @@ private struct SwitcherHUDView: View {
     let onSettings: () -> Void
     let onSelect: (pid_t) -> Void
 
+    @State private var gearHovering = false
+
     private static let baseIconSize: CGFloat = 48
     private static let frontSpacing: CGFloat = 60  // ring-chord spacing between adjacent slots
     private static let frontNeighborGap: CGFloat = 52  // min horizontal gap, front icon to its neighbors
@@ -254,30 +256,20 @@ private struct SwitcherHUDView: View {
                     // the focused app clearly outranks its neighbors, while
                     // the floor keeps the back row legible.
                     let emphasis = pow(depth, 2.5)
-                    Image(nsImage: slot.entry.icon)
-                        .resizable()
-                        .frame(width: Self.baseIconSize, height: Self.baseIconSize)
-                        .background {
-                            if slot.offset == 0 {
-                                Circle()
-                                    .fill(.white.opacity(0.28))
-                                    .frame(
-                                        width: Self.baseIconSize * 1.5,
-                                        height: Self.baseIconSize * 1.5
-                                    )
-                                    .blur(radius: 14)
-                            }
-                        }
-                        .scaleEffect(0.66 + 0.64 * emphasis)
-                        .shadow(color: .black.opacity(0.4 * depth), radius: 6, y: 3)
-                        .opacity(0.68 + 0.32 * depth)
-                        .contentShape(Rectangle())
-                        .onTapGesture { onSelect(slot.entry.id) }
-                        .position(
-                            x: centerX + sin(theta) * radius,
-                            y: centerY - (1 - depth) * Self.verticalDepth
-                        )
-                        .zIndex(Double(depth))
+                    CarouselIcon(
+                        icon: slot.entry.icon,
+                        showGlow: slot.offset == 0,
+                        iconSize: Self.baseIconSize,
+                        scale: 0.66 + 0.64 * emphasis,
+                        shadowOpacity: 0.4 * depth,
+                        iconOpacity: 0.68 + 0.32 * depth,
+                        onTap: { onSelect(slot.entry.id) }
+                    )
+                    .position(
+                        x: centerX + sin(theta) * radius,
+                        y: centerY - (1 - depth) * Self.verticalDepth
+                    )
+                    .zIndex(Double(depth))
                 }
             }
             .frame(width: width, height: height)
@@ -303,11 +295,63 @@ private struct SwitcherHUDView: View {
             Button(action: onSettings) {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 15))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.white.opacity(gearHovering ? 0.95 : 0.5))
+                    .scaleEffect(gearHovering ? 1.12 : 1)
+                    .animation(.easeOut(duration: 0.12), value: gearHovering)
             }
             .buttonStyle(.plain)
             .padding(16)
+            .onHover { isHovering in
+                gearHovering = isHovering
+                if isHovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
         }
         .onHover(perform: onHover)
+    }
+}
+
+/// One app icon on the ring; brightens, pops, and shows the pointing-hand
+/// cursor on hover so it reads as clickable.
+private struct CarouselIcon: View {
+    let icon: NSImage
+    let showGlow: Bool
+    let iconSize: CGFloat
+    let scale: CGFloat
+    let shadowOpacity: Double
+    let iconOpacity: Double
+    let onTap: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Image(nsImage: icon)
+            .resizable()
+            .frame(width: iconSize, height: iconSize)
+            .background {
+                if showGlow {
+                    Circle()
+                        .fill(.white.opacity(0.28))
+                        .frame(width: iconSize * 1.5, height: iconSize * 1.5)
+                        .blur(radius: 14)
+                }
+            }
+            .scaleEffect(scale * (hovering ? 1.08 : 1))
+            .shadow(color: .black.opacity(shadowOpacity), radius: 6, y: 3)
+            .opacity(hovering ? 1 : iconOpacity)
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .contentShape(Rectangle())
+            .onHover { isHovering in
+                hovering = isHovering
+                if isHovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .onTapGesture(perform: onTap)
     }
 }

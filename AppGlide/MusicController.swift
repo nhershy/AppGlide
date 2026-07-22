@@ -26,6 +26,12 @@ enum MusicState: Equatable {
     case playing(NowPlaying)
 }
 
+enum MusicDestination {
+    case song
+    case album
+    case artist
+}
+
 /// Talks to the Music app over Apple Events. Requires the hardened-runtime
 /// entitlement com.apple.security.automation.apple-events — without it macOS
 /// auto-denies every event silently, with no consent prompt.
@@ -208,5 +214,61 @@ final class MusicController {
     func openMusic() {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.musicBundleID) else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    // MARK: - Navigation (click-through from the HUD)
+
+    /// Opens Apple Music at the current song / its album / its artist,
+    /// resolved through the iTunes Search API. Falls back to revealing the
+    /// current track inside the Music app when the lookup can't resolve
+    /// (local files, no network).
+    func open(_ destination: MusicDestination, for now: NowPlaying) async {
+        if let url = await Self.catalogURL(for: destination, now: now) {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        await run("tell application \"Music\" to reveal current track")
+        NSRunningApplication.runningApplications(withBundleIdentifier: Self.musicBundleID).first?
+            .activate()
+    }
+
+    private nonisolated struct SearchResponse: Decodable {
+        struct Item: Decodable {
+            let trackViewUrl: String?
+            let collectionViewUrl: String?
+            let artistViewUrl: String?
+        }
+        let results: [Item]
+    }
+
+    private nonisolated static func catalogURL(
+        for destination: MusicDestination,
+        now: NowPlaying
+    ) async -> URL? {
+        var components = URLComponents(string: "https://itunes.apple.com/search")!
+        components.queryItems = [
+            URLQueryItem(name: "term", value: "\(now.artist) \(now.title)"),
+            URLQueryItem(name: "entity", value: "song"),
+            URLQueryItem(name: "limit", value: "1"),
+            URLQueryItem(name: "country", value: Locale.current.region?.identifier ?? "US"),
+        ]
+        guard let url = components.url,
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let response = try? JSONDecoder().decode(SearchResponse.self, from: data),
+              let item = response.results.first else {
+            return nil
+        }
+        let target: String?
+        switch destination {
+        case .song: target = item.trackViewUrl
+        case .album: target = item.collectionViewUrl
+        case .artist: target = item.artistViewUrl
+        }
+        guard var urlString = target else { return nil }
+        // The music:// scheme opens the Music app instead of a browser.
+        if urlString.hasPrefix("https://") {
+            urlString = "music://" + urlString.dropFirst("https://".count)
+        }
+        return URL(string: urlString)
     }
 }

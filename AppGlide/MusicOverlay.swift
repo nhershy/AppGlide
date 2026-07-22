@@ -230,6 +230,9 @@ private struct MusicHUDView: View {
     /// poll; held briefly after seek so the bar doesn't snap back before the
     /// next poll reflects the new position.
     @State private var scrubFraction: Double?
+    @State private var artworkHovering = false
+    @State private var barHovering = false
+    @State private var playlistHovering = false
 
     var body: some View {
         Group {
@@ -289,21 +292,74 @@ private struct MusicHUDView: View {
     private func player(now: NowPlaying?) -> some View {
         HStack(spacing: 14) {
             artworkView
+                .brightness(artworkHovering ? 0.04 : 0)
+                .scaleEffect(artworkHovering ? 1.02 : 1)
+                .animation(.easeOut(duration: 0.12), value: artworkHovering)
+                .onHover { hovering in
+                    artworkHovering = hovering
+                    if hovering {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+                .onTapGesture {
+                    if let now { navigate(.album, now) }
+                }
             VStack(alignment: .leading, spacing: 4) {
-                Text(now?.title ?? "Nothing playing")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Text(now.map { "\($0.artist) — \($0.album)" } ?? " ")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.65))
-                    .lineLimit(1)
+                if let now {
+                    ClickableText(
+                        now.title,
+                        font: .system(size: 16, weight: .semibold),
+                        base: .white,
+                        hover: .white
+                    ) { navigate(.song, now) }
+                } else {
+                    Text("Nothing playing")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+                bylineView(now: now)
                 progressBar(now: now)
                 controls(now: now)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    /// Artist and album as separate tap targets: artist opens the artist page,
+    /// album the album page.
+    @ViewBuilder
+    private func bylineView(now: NowPlaying?) -> some View {
+        if let now {
+            HStack(spacing: 0) {
+                ClickableText(
+                    now.artist,
+                    font: .system(size: 14),
+                    base: .white.opacity(0.65),
+                    hover: .white
+                ) { navigate(.artist, now) }
+                Text(" — ")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.65))
+                ClickableText(
+                    now.album,
+                    font: .system(size: 14),
+                    base: .white.opacity(0.65),
+                    hover: .white
+                ) { navigate(.album, now) }
+            }
+        } else {
+            Text(" ")
+                .font(.system(size: 14))
+        }
+    }
+
+    private func navigate(_ destination: MusicDestination, _ now: NowPlaying) {
+        onInteract()
+        Task { await controller.open(destination, for: now) }
     }
 
     private var artworkView: some View {
@@ -329,19 +385,27 @@ private struct MusicHUDView: View {
         let duration = now?.duration ?? 0
         let fraction = scrubFraction ?? progressFraction(now)
         let shownPosition = scrubFraction.map { $0 * duration } ?? (now?.position ?? 0)
+        let barActive = barHovering || scrubFraction != nil
         return HStack(spacing: 8) {
             Text(timeString(shownPosition))
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(.white.opacity(0.15))
-                        .frame(height: 4)
+                        .frame(height: barActive ? 6 : 4)
                     Capsule()
-                        .fill(.white.opacity(0.75))
-                        .frame(width: max(geometry.size.width * fraction, 0), height: 4)
+                        .fill(.white.opacity(barActive ? 0.9 : 0.75))
+                        .frame(width: max(geometry.size.width * fraction, 0), height: barActive ? 6 : 4)
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 11, height: 11)
+                        .offset(x: max(geometry.size.width * fraction - 5.5, 0))
+                        .opacity(barActive ? 1 : 0)
                 }
                 .frame(maxHeight: .infinity)
+                .animation(.easeOut(duration: 0.12), value: barActive)
                 .contentShape(Rectangle())
+                .onHover { barHovering = $0 }
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
@@ -402,11 +466,23 @@ private struct MusicHUDView: View {
             } label: {
                 Image(systemName: "text.badge.plus")
                     .font(.system(size: 15))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(playlistHovering ? 1 : 0.85))
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(.white.opacity(playlistHovering ? 0.15 : 0)))
+                    .scaleEffect(playlistHovering ? 1.08 : 1)
+                    .animation(.easeOut(duration: 0.12), value: playlistHovering)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .onHover { isHovering in
+                playlistHovering = isHovering
+                if isHovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
             controlButton("shuffle", tint: now?.shuffle == true ? .accentColor : nil) {
                 await controller.toggleShuffle()
             }
@@ -420,17 +496,10 @@ private struct MusicHUDView: View {
         tint: Color? = nil,
         action: @escaping () async -> Void
     ) -> some View {
-        Button {
+        ControlButton(symbol: symbol, size: size, hitSize: hitSize, tint: tint) {
             onInteract()
             Task { await action() }
-        } label: {
-            Image(systemName: symbol)
-                .font(.system(size: size))
-                .foregroundStyle(tint ?? Color.white.opacity(0.85))
-                .frame(width: hitSize, height: hitSize)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
     }
 
     private func progressFraction(_ now: NowPlaying?) -> CGFloat {
@@ -441,5 +510,77 @@ private struct MusicHUDView: View {
     private func timeString(_ seconds: Double) -> String {
         let total = Int(seconds.rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// Icon button that lights up on hover: soft circular highlight, full-bright
+/// icon, slight pop, pointing-hand cursor.
+private struct ControlButton: View {
+    let symbol: String
+    let size: CGFloat
+    let hitSize: CGFloat
+    let tint: Color?
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size))
+                .foregroundStyle(tint ?? Color.white.opacity(hovering ? 1 : 0.85))
+                .frame(width: hitSize, height: hitSize)
+                .background(Circle().fill(.white.opacity(hovering ? 0.15 : 0)))
+                .contentShape(Rectangle())
+                .scaleEffect(hovering ? 1.08 : 1)
+                .animation(.easeOut(duration: 0.12), value: hovering)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering in
+            hovering = isHovering
+            if isHovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+    }
+}
+
+/// Text that reads as a link on hover: brighter color, slight grow, and the
+/// pointing-hand cursor.
+private struct ClickableText: View {
+    let string: String
+    let font: Font
+    let base: Color
+    let hover: Color
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    init(_ string: String, font: Font, base: Color, hover: Color, action: @escaping () -> Void) {
+        self.string = string
+        self.font = font
+        self.base = base
+        self.hover = hover
+        self.action = action
+    }
+
+    var body: some View {
+        Text(string)
+            .font(font)
+            .foregroundStyle(hovering ? hover : base)
+            .lineLimit(1)
+            .scaleEffect(hovering ? 1.05 : 1, anchor: .leading)
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .onHover { isHovering in
+                hovering = isHovering
+                if isHovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .onTapGesture(perform: action)
     }
 }
