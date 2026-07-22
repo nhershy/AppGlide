@@ -34,13 +34,15 @@ final class MusicOverlay {
     private let model = MusicHUDModel()
     private var panel: NSPanel?
     private var hostingView: FirstMouseHostingView<MusicHUDView>?
-    private var hideTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
 
     init(controller: MusicController) {
         self.controller = controller
         HUDHoverState.shared.addObserver { [weak self] anyHovering in
             self?.sharedHoverChanged(anyHovering)
+        }
+        HUDAutoHide.shared.addExpireHandler { [weak self] in
+            self?.hide()
         }
     }
 
@@ -92,17 +94,12 @@ final class MusicOverlay {
             model.state = .permissionDenied
         }
         startPolling()
-        if HUDHoverState.shared.anyHovering {
-            hideTask?.cancel()
-            hideTask = nil
-        } else {
+        if !HUDHoverState.shared.anyHovering {
             scheduleAutoHide()
         }
     }
 
     func hide() {
-        hideTask?.cancel()
-        hideTask = nil
         pollTask?.cancel()
         pollTask = nil
         HUDHoverState.shared.setHovering(false, for: "music")
@@ -147,14 +144,9 @@ final class MusicOverlay {
     }
 
     private func scheduleAutoHide() {
-        hideTask?.cancel()
         let stored = UserDefaults.standard.double(forKey: PrefKey.musicHudDuration)
         let delay: Duration = stored > 0 ? .seconds(stored) : Self.autoHideDelay
-        hideTask = Task { [weak self] in
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled else { return }
-            self?.hide()
-        }
+        HUDAutoHide.shared.requestAutoHide(after: delay)
     }
 
     /// Any interaction keeps the HUD alive.
@@ -170,8 +162,7 @@ final class MusicOverlay {
 
     private func sharedHoverChanged(_ anyHovering: Bool) {
         if anyHovering {
-            hideTask?.cancel()
-            hideTask = nil
+            HUDAutoHide.shared.cancel()
             if let panel, panel.isVisible {
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.1

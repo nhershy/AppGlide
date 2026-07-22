@@ -16,7 +16,6 @@ final class SwitcherOverlay {
 
     private var panel: NSPanel?
     private var hostingView: NSHostingView<SwitcherHUDView>?
-    private var hideTask: Task<Void, Never>?
     private let autoHideDelay: Duration
     /// Extra bottom clearance while the music HUD occupies the bottom slot.
     private var bottomInset: CGFloat = 0
@@ -26,6 +25,9 @@ final class SwitcherOverlay {
         self.autoHideDelay = autoHideDelay
         HUDHoverState.shared.addObserver { [weak self] anyHovering in
             self?.sharedHoverChanged(anyHovering)
+        }
+        HUDAutoHide.shared.addExpireHandler { [weak self] in
+            self?.hide()
         }
         musicObserver = NotificationCenter.default.addObserver(
             forName: .musicHUDVisibilityChanged,
@@ -105,17 +107,12 @@ final class SwitcherOverlay {
             }
         }
 
-        if HUDHoverState.shared.anyHovering {
-            hideTask?.cancel()
-            hideTask = nil
-        } else {
+        if !HUDHoverState.shared.anyHovering {
             scheduleAutoHide()
         }
     }
 
     func hide() {
-        hideTask?.cancel()
-        hideTask = nil
         HUDHoverState.shared.setHovering(false, for: "carousel")
         guard let panel, panel.isVisible, panel.alphaValue > 0 else { return }
         NSAnimationContext.runAnimationGroup { context in
@@ -131,14 +128,9 @@ final class SwitcherOverlay {
     }
 
     private func scheduleAutoHide() {
-        hideTask?.cancel()
         let stored = UserDefaults.standard.double(forKey: PrefKey.hudDuration)
         let delay: Duration = stored > 0 ? .seconds(stored) : autoHideDelay
-        hideTask = Task { [weak self] in
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled else { return }
-            self?.hide()
-        }
+        HUDAutoHide.shared.requestAutoHide(after: delay)
     }
 
     private func hoverChanged(_ hovering: Bool) {
@@ -147,8 +139,7 @@ final class SwitcherOverlay {
 
     private func sharedHoverChanged(_ anyHovering: Bool) {
         if anyHovering {
-            hideTask?.cancel()
-            hideTask = nil
+            HUDAutoHide.shared.cancel()
             // Interrupt an in-flight fade-out so the HUD revives under the cursor.
             if let panel, panel.isVisible {
                 NSAnimationContext.runAnimationGroup { context in
