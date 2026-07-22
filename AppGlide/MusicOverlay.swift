@@ -18,17 +18,16 @@ final class MusicHUDModel: ObservableObject {
     @Published var state: MusicState = .notRunning
     @Published var artwork: NSImage?
     @Published var playlists: [String] = []
-    @Published var width: CGFloat = MusicOverlay.defaultWidth
 }
 
 /// Floating Apple Music controls in the carousel's bottom-center slot,
 /// toggled by a 3-finger swipe down. Non-activating; hovering either HUD
 /// pins both open.
 final class MusicOverlay {
-    static let defaultWidth: CGFloat = 420
+    static let hudWidth: CGFloat = 460
     /// Fixed height for all states: keeps the stacking offset known before
     /// layout and avoids frame churn when the state flips mid-display.
-    static let hudHeight: CGFloat = 104
+    static let hudHeight: CGFloat = 128
     private static let autoHideDelay: Duration = .seconds(2)
 
     private let controller: MusicController
@@ -62,9 +61,7 @@ final class MusicOverlay {
 
     func show() {
         let panel = ensurePanel()
-        // Match the carousel's width so the stacked HUDs read as one system.
-        let size = NSSize(width: HUDLayout.carouselWidth ?? Self.defaultWidth, height: Self.hudHeight)
-        model.width = size.width
+        let size = NSSize(width: Self.hudWidth, height: Self.hudHeight)
         let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
             ?? NSScreen.main
             ?? NSScreen.screens.first
@@ -198,7 +195,7 @@ final class MusicOverlay {
         )
         let hosting = FirstMouseHostingView(rootView: root)
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: Self.defaultWidth, height: Self.hudHeight),
+            contentRect: NSRect(x: 0, y: 0, width: Self.hudWidth, height: Self.hudHeight),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -229,6 +226,11 @@ private struct MusicHUDView: View {
     let onHover: (Bool) -> Void
     let onInteract: () -> Void
 
+    /// While set, the bar and elapsed label follow the drag instead of the
+    /// poll; held briefly after seek so the bar doesn't snap back before the
+    /// next poll reflects the new position.
+    @State private var scrubFraction: Double?
+
     var body: some View {
         Group {
             switch model.state {
@@ -255,7 +257,7 @@ private struct MusicHUDView: View {
                 player(now: now)
             }
         }
-        .frame(width: model.width, height: MusicOverlay.hudHeight)
+        .frame(width: MusicOverlay.hudWidth, height: MusicOverlay.hudHeight)
         .background(HUDBackground())
         .clipShape(RoundedRectangle(cornerRadius: 36))
         .overlay {
@@ -285,16 +287,16 @@ private struct MusicHUDView: View {
     }
 
     private func player(now: NowPlaying?) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             artworkView
             VStack(alignment: .leading, spacing: 4) {
                 Text(now?.title ?? "Nothing playing")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                 Text(now.map { "\($0.artist) — \($0.album)" } ?? " ")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.65))
                     .lineLimit(1)
                 progressBar(now: now)
                 controls(now: now)
@@ -314,39 +316,71 @@ private struct MusicHUDView: View {
                 ZStack {
                     Rectangle().fill(.white.opacity(0.1))
                     Image(systemName: "music.note")
-                        .font(.system(size: 24))
+                        .font(.system(size: 26))
                         .foregroundStyle(.white.opacity(0.4))
                 }
             }
         }
-        .frame(width: 72, height: 72)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .frame(width: 88, height: 88)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private func progressBar(now: NowPlaying?) -> some View {
-        HStack(spacing: 6) {
-            Text(timeString(now?.position ?? 0))
+        let duration = now?.duration ?? 0
+        let fraction = scrubFraction ?? progressFraction(now)
+        let shownPosition = scrubFraction.map { $0 * duration } ?? (now?.position ?? 0)
+        return HStack(spacing: 8) {
+            Text(timeString(shownPosition))
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.15))
                     Capsule()
-                        .fill(.white.opacity(0.7))
-                        .frame(width: geometry.size.width * progressFraction(now))
+                        .fill(.white.opacity(0.15))
+                        .frame(height: 4)
+                    Capsule()
+                        .fill(.white.opacity(0.75))
+                        .frame(width: max(geometry.size.width * fraction, 0), height: 4)
                 }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard duration > 0 else { return }
+                            onInteract()
+                            scrubFraction = min(max(value.location.x / geometry.size.width, 0), 1)
+                        }
+                        .onEnded { value in
+                            guard duration > 0 else {
+                                scrubFraction = nil
+                                return
+                            }
+                            let target = min(max(value.location.x / geometry.size.width, 0), 1)
+                            scrubFraction = target
+                            Task {
+                                await controller.seek(to: target * duration)
+                                // Hold the scrubbed position until the next
+                                // poll reflects it, so the bar doesn't snap back.
+                                try? await Task.sleep(for: .milliseconds(1200))
+                                scrubFraction = nil
+                            }
+                        }
+                )
             }
-            .frame(height: 3)
-            Text(timeString(now?.duration ?? 0))
+            .frame(height: 16)
+            Text(timeString(duration))
         }
-        .font(.system(size: 9).monospacedDigit())
-        .foregroundStyle(.white.opacity(0.5))
+        .font(.system(size: 12).monospacedDigit())
+        .foregroundStyle(.white.opacity(0.6))
     }
 
     private func controls(now: NowPlaying?) -> some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             controlButton("backward.fill") { await controller.previous() }
-            controlButton(now?.isPlaying == true ? "pause.fill" : "play.fill") {
-                await controller.playPause()
-            }
+            controlButton(
+                now?.isPlaying == true ? "pause.fill" : "play.fill",
+                size: 22,
+                hitSize: 34
+            ) { await controller.playPause() }
             controlButton("forward.fill") { await controller.next() }
             Spacer()
             controlButton(
@@ -367,7 +401,7 @@ private struct MusicHUDView: View {
                 }
             } label: {
                 Image(systemName: "text.badge.plus")
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundStyle(.white.opacity(0.85))
             }
             .menuStyle(.borderlessButton)
@@ -381,6 +415,8 @@ private struct MusicHUDView: View {
 
     private func controlButton(
         _ symbol: String,
+        size: CGFloat = 16,
+        hitSize: CGFloat = 26,
         tint: Color? = nil,
         action: @escaping () async -> Void
     ) -> some View {
@@ -389,8 +425,10 @@ private struct MusicHUDView: View {
             Task { await action() }
         } label: {
             Image(systemName: symbol)
-                .font(.system(size: 14))
+                .font(.system(size: size))
                 .foregroundStyle(tint ?? Color.white.opacity(0.85))
+                .frame(width: hitSize, height: hitSize)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

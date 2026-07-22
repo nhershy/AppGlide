@@ -81,7 +81,6 @@ final class SwitcherOverlay {
         let panel = ensurePanel(rootView: root)
         if let hostingView {
             let size = hostingView.fittingSize
-            HUDLayout.carouselWidth = size.width
             let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
                 ?? NSScreen.main
                 ?? NSScreen.screens.first

@@ -168,6 +168,10 @@ final class MusicController {
         await run("tell application \"Music\" to set shuffle enabled to not shuffle enabled")
     }
 
+    func seek(to seconds: Double) async {
+        await run("tell application \"Music\" to set player position to \(max(seconds, 0))")
+    }
+
     func addToLibrary() async {
         guard Self.isMusicRunning else { return }
         let primary = "tell application \"Music\" to duplicate current track to source \"Library\""

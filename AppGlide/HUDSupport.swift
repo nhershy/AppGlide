@@ -37,13 +37,6 @@ final class HUDHoverState {
     }
 }
 
-/// Cross-HUD layout facts.
-@MainActor
-enum HUDLayout {
-    /// Last width the carousel laid out at; the music HUD matches it.
-    static var carouselWidth: CGFloat?
-}
-
 /// The shared HUD chrome backdrop: system HUD material blurring what's behind
 /// the panel, plus a dark scrim so the hardcoded white text stays readable
 /// even when very bright content sits underneath.
