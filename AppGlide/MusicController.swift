@@ -114,7 +114,7 @@ final class MusicController {
         switch await Self.executeAsync(source) {
         case .failure(let error):
             if error.code == Self.errAEEventNotPermitted { return .permissionDenied }
-            NSLog("AppGlide: Music refresh failed (\(error.code)) \(error.message)")
+            AppLog.log("Music refresh failed (\(error.code)) \(error.message)")
             return .nothingPlaying
         case .success(let descriptor):
             guard descriptor.numberOfItems >= 1,
@@ -156,7 +156,7 @@ final class MusicController {
     private func run(_ source: String) async {
         guard Self.isMusicRunning else { return }
         if case .failure(let error) = await Self.executeAsync(source), error.code != 0 {
-            NSLog("AppGlide: Music command failed (\(error.code)) \(error.message): \(source)")
+            AppLog.log("Music command failed (\(error.code)) \(error.message): \(source)")
         }
     }
 
@@ -185,7 +185,7 @@ final class MusicController {
             if error.code == Self.errAENoSuchObject {
                 await run("tell application \"Music\" to duplicate current track to library playlist 1")
             } else if error.code != 0 {
-                NSLog("AppGlide: add to library failed (\(error.code)) \(error.message)")
+                AppLog.log("add to library failed (\(error.code)) \(error.message)")
             }
         }
     }
@@ -203,11 +203,69 @@ final class MusicController {
         }
     }
 
+    /// Streaming tracks can't be duplicated straight into a playlist
+    /// (error -10006): they must be added to the Library, and the LIBRARY
+    /// COPY placed into the playlist. The library copy of a fresh add appears
+    /// asynchronously (iCloud Music Library sync — can take many seconds), so
+    /// the wait is a Swift-side retry of small quick scripts rather than one
+    /// long blocking script: refresh polls interleave and the UI stays live.
     func addToPlaylist(_ name: String) async {
-        let escaped = name
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        await run("tell application \"Music\" to duplicate current track to playlist \"\(escaped)\"")
+        func esc(_ s: String) -> String {
+            s.replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+        }
+        let playlist = esc(name)
+        AppLog.log("add to playlist \"\(name)\" requested")
+
+        let direct = "tell application \"Music\" to duplicate current track to playlist \"\(playlist)\""
+        switch await Self.executeAsync(direct) {
+        case .success:
+            AppLog.log("add to playlist \"\(name)\": direct")
+            return
+        case .failure(let error):
+            guard error.code == -10006 else {
+                AppLog.log("add to playlist \"\(name)\" failed (\(error.code)) \(error.message)")
+                return
+            }
+        }
+
+        // Capture the track's identity and kick off the library add.
+        let prep = """
+        tell application "Music"
+            set t to current track
+            try
+                duplicate t to source "Library"
+            end try
+            return (name of t) & linefeed & (artist of t)
+        end tell
+        """
+        guard Self.isMusicRunning,
+              case .success(let descriptor) = await Self.executeAsync(prep),
+              let combined = descriptor.stringValue,
+              case let parts = combined.components(separatedBy: "\n"),
+              parts.count >= 2 else {
+            AppLog.log("add to playlist \"\(name)\": library add prep failed")
+            return
+        }
+        let find = """
+        tell application "Music"
+            set matches to (every track of library playlist 1 whose ¬
+                name is "\(esc(parts[0]))" and artist is "\(esc(parts[1]))")
+            if (count of matches) is 0 then return "pending"
+            duplicate (item 1 of matches) to playlist "\(playlist)"
+            return "done"
+        end tell
+        """
+        for attempt in 1...30 {
+            guard Self.isMusicRunning else { return }
+            if case .success(let result) = await Self.executeAsync(find),
+               result.stringValue == "done" {
+                AppLog.log("add to playlist \"\(name)\": two-step done (attempt \(attempt))")
+                return
+            }
+            try? await Task.sleep(for: .seconds(1))
+        }
+        AppLog.log("add to playlist \"\(name)\": library copy never appeared within 30s")
     }
 
     /// Explicit user action only (Open Music button).

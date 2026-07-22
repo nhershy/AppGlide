@@ -20,6 +20,19 @@ final class MusicHUDModel: ObservableObject {
     @Published var playlists: [String] = []
 }
 
+/// Explicit menu-item target: SwiftUI Menu actions never dispatch from a
+/// non-activating panel (the window can't become key), so the playlist menu
+/// is a manually popped NSMenu with target/action wiring instead.
+private final class PlaylistMenuTarget: NSObject {
+    var onSelect: ((String) -> Void)?
+
+    @objc func fire(_ sender: NSMenuItem) {
+        if let name = sender.representedObject as? String {
+            onSelect?(name)
+        }
+    }
+}
+
 /// Floating Apple Music controls in the carousel's bottom-center slot,
 /// toggled by a 3-finger swipe down. Non-activating; hovering either HUD
 /// pins both open.
@@ -35,6 +48,7 @@ final class MusicOverlay {
     private var panel: NSPanel?
     private var hostingView: FirstMouseHostingView<MusicHUDView>?
     private var pollTask: Task<Void, Never>?
+    private let playlistMenuTarget = PlaylistMenuTarget()
 
     init(controller: MusicController) {
         self.controller = controller
@@ -43,6 +57,40 @@ final class MusicOverlay {
         }
         HUDAutoHide.shared.addExpireHandler { [weak self] in
             self?.hide()
+        }
+        playlistMenuTarget.onSelect = { [weak self] name in
+            guard let self else { return }
+            Task { await self.controller.addToPlaylist(name) }
+        }
+    }
+
+    /// Pops the playlist menu natively. Blocks during menu tracking; the
+    /// shared auto-hide is paused so the HUD can't vanish under an open menu.
+    private func showPlaylistMenu() {
+        HUDAutoHide.shared.cancel()
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        if model.playlists.isEmpty {
+            let item = NSMenuItem(title: "No playlists", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        } else {
+            for name in model.playlists {
+                let item = NSMenuItem(
+                    title: name,
+                    action: #selector(PlaylistMenuTarget.fire(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = playlistMenuTarget
+                item.representedObject = name
+                item.isEnabled = true
+                menu.addItem(item)
+            }
+        }
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        // popUp blocks until the menu closes; restart the clock afterwards.
+        if isVisible, !HUDHoverState.shared.anyHovering {
+            scheduleAutoHide()
         }
     }
 
@@ -183,7 +231,8 @@ final class MusicOverlay {
             model: model,
             controller: controller,
             onHover: { [weak self] hovering in self?.hoverChanged(hovering) },
-            onInteract: { [weak self] in self?.userDidInteract() }
+            onInteract: { [weak self] in self?.userDidInteract() },
+            onPlaylistMenu: { [weak self] in self?.showPlaylistMenu() }
         )
         let hosting = FirstMouseHostingView(rootView: root)
         let panel = NSPanel(
@@ -217,6 +266,7 @@ private struct MusicHUDView: View {
     let controller: MusicController
     let onHover: (Bool) -> Void
     let onInteract: () -> Void
+    let onPlaylistMenu: () -> Void
 
     /// While set, the bar and elapsed label follow the drag instead of the
     /// poll; held briefly after seek so the bar doesn't snap back before the
@@ -224,7 +274,6 @@ private struct MusicHUDView: View {
     @State private var scrubFraction: Double?
     @State private var artworkHovering = false
     @State private var barHovering = false
-    @State private var playlistHovering = false
 
     var body: some View {
         Group {
@@ -444,37 +493,7 @@ private struct MusicHUDView: View {
                 tint: now?.favorited == true ? .red : nil
             ) { await controller.toggleFavorite() }
             controlButton("plus.circle") { await controller.addToLibrary() }
-            Menu {
-                if model.playlists.isEmpty {
-                    Text("No playlists")
-                } else {
-                    ForEach(model.playlists, id: \.self) { playlist in
-                        Button(playlist) {
-                            onInteract()
-                            Task { await controller.addToPlaylist(playlist) }
-                        }
-                    }
-                }
-            } label: {
-                Image(systemName: "text.badge.plus")
-                    .font(.system(size: 15))
-                    .foregroundStyle(.white.opacity(playlistHovering ? 1 : 0.85))
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(.white.opacity(playlistHovering ? 0.15 : 0)))
-                    .scaleEffect(playlistHovering ? 1.08 : 1)
-                    .animation(.easeOut(duration: 0.12), value: playlistHovering)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .onHover { isHovering in
-                playlistHovering = isHovering
-                if isHovering {
-                    NSCursor.pointingHand.push()
-                } else {
-                    NSCursor.pop()
-                }
-            }
+            controlButton("text.badge.plus", size: 15) { onPlaylistMenu() }
             controlButton("shuffle", tint: now?.shuffle == true ? .accentColor : nil) {
                 await controller.toggleShuffle()
             }
