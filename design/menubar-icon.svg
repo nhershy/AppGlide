@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="733" height="733" viewBox="102 207 733 733">
+  <!-- Menu-bar template glyph: the logo's hand plus motion streaks. Only
+       alpha matters (template image); the streaks use partial opacity so
+       they render softer than the hand, like the logo. Gaps and streaks are
+       drawn thicker than the logo's so they survive ~18 px rendering. -->
+  <defs>
+    <linearGradient id="tail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="black" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="black" stop-opacity="0.95"/>
+    </linearGradient>
+    <mask id="carve">
+      <path fill="white" d="M 425 940
+        C 390 830 330 740 296 668
+        C 278 630 278 596 300 578
+        C 330 562 358 598 370 636
+        C 377 656 383 666 391 668
+        C 389 560 388 460 388 366
+        C 388 288 497 288 497 366
+        C 501 470 504 550 507 604
+        Q 513 622 519 604
+        C 526 500 534 380 540 318
+        C 540 240 651 240 651 318
+        C 646 420 637 540 630 600
+        Q 639 620 648 602
+        C 657 540 673 470 682 436
+        C 682 360 790 360 790 436
+        C 787 500 775 560 764 618
+        C 770 660 771 700 768 740
+        C 763 820 738 890 715 940
+        Z"/>
+      <g fill="none" stroke="black" stroke-width="30" stroke-linecap="round">
+        <path d="M 519 330 C 516 450 512 550 513 616"/>
+        <path d="M 668 430 C 660 490 646 555 639 618"/>
+      </g>
+    </mask>
+  </defs>
+  <!-- motion streaks -->
+  <rect x="168" y="207" width="192" height="52" rx="26" fill="url(#tail)"/>
+  <rect x="148" y="287" width="208" height="52" rx="26" fill="url(#tail)"/>
+  <rect x="186" y="367" width="144" height="52" rx="26" fill="url(#tail)"/>
+  <!-- hand -->
+  <rect x="102" y="207" width="733" height="733" fill="black" mask="url(#carve)"/>
+</svg>
