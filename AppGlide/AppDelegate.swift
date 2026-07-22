@@ -10,6 +10,8 @@ import ServiceManagement
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appSwitcher: AppSwitcher?
     private var gestureMonitor: GestureMonitor?
+    private var musicController: MusicController?
+    private var musicOverlay: MusicOverlay?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let defaults = UserDefaults.standard
@@ -25,8 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let switcher = AppSwitcher()
         let monitor = GestureMonitor(switcher: switcher)
+        let music = MusicController()
+        let overlay = MusicOverlay(controller: music)
         appSwitcher = switcher
         gestureMonitor = monitor
+        musicController = music
+        musicOverlay = overlay
+        monitor.onMusicGesture = { [weak overlay] in overlay?.toggle() }
         monitor.start()
     }
 

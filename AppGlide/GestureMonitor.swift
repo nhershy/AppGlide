@@ -15,6 +15,8 @@ enum PrefKey {
     static let hudDuration = "hudDuration"
     static let hapticsEnabled = "hapticsEnabled"
     static let excludedBundleIDs = "excludedBundleIDs"
+    static let musicHUDEnabled = "musicHUDEnabled"
+    static let musicHudDuration = "musicHudDuration"
     static let hasShownSetup = "hasShownSetup"
     static let loginItemPath = "loginItemRegisteredPath"
 }
@@ -39,6 +41,9 @@ enum MinimizedAppBehavior: String {
 
 /// Consumes the global multitouch stream and forwards recognized swipes to the switcher.
 final class GestureMonitor {
+    /// Fired on a 3-finger swipe down (music HUD toggle); wired by AppDelegate.
+    var onMusicGesture: (() -> Void)?
+
     private let switcher: AppSwitcher
     private var recognizer = SwipeGestureRecognizer()
     private var task: Task<Void, Never>?
@@ -80,6 +85,12 @@ final class GestureMonitor {
         guard let direction = recognizer.consume(frame) else { return }
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: PrefKey.isPaused) else { return }
+
+        if direction == .down {
+            guard defaults.object(forKey: PrefKey.musicHUDEnabled) as? Bool ?? true else { return }
+            onMusicGesture?()
+            return
+        }
 
         // Swipe right → previous/older app (step +1), swipe left → newer (step -1).
         var step = direction == .right ? 1 : -1

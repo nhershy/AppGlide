@@ -6,12 +6,6 @@
 import AppKit
 import SwiftUI
 
-/// Accepts the first click even though the panel never becomes key, so the
-/// HUD's gear button responds to a single tap.
-private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-}
-
 /// Bottom-of-screen HUD showing the app ring, with the current selection front
 /// and center. The panel is non-activating, so it never steals focus from the
 /// app being switched to. Hovering the mouse over it pins it open; a gear
@@ -23,11 +17,45 @@ final class SwitcherOverlay {
     private var panel: NSPanel?
     private var hostingView: NSHostingView<SwitcherHUDView>?
     private var hideTask: Task<Void, Never>?
-    private var isHovering = false
     private let autoHideDelay: Duration
+    /// Extra bottom clearance while the music HUD occupies the bottom slot.
+    private var bottomInset: CGFloat = 0
+    private var musicObserver: NSObjectProtocol?
 
     init(autoHideDelay: Duration) {
         self.autoHideDelay = autoHideDelay
+        HUDHoverState.shared.addObserver { [weak self] anyHovering in
+            self?.sharedHoverChanged(anyHovering)
+        }
+        musicObserver = NotificationCenter.default.addObserver(
+            forName: .musicHUDVisibilityChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let height = note.userInfo?["height"] as? CGFloat ?? 0
+            MainActor.assumeIsolated {
+                self?.musicHUDHeightChanged(height)
+            }
+        }
+    }
+
+    deinit {
+        if let musicObserver {
+            NotificationCenter.default.removeObserver(musicObserver)
+        }
+    }
+
+    private func musicHUDHeightChanged(_ height: CGFloat) {
+        bottomInset = height > 0 ? height + 12 : 0
+        guard let panel, panel.isVisible, panel.alphaValue > 0 else { return }
+        let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first
+        guard let screen else { return }
+        var frame = panel.frame
+        frame.origin.y = screen.visibleFrame.minY + 24 + bottomInset
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            panel.animator().setFrame(frame, display: true)
+        }
     }
 
     /// `apps` is the frozen session order ([0] = most recent); `selectedIndex`
@@ -53,12 +81,16 @@ final class SwitcherOverlay {
         let panel = ensurePanel(rootView: root)
         if let hostingView {
             let size = hostingView.fittingSize
+            HUDLayout.carouselWidth = size.width
             let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
                 ?? NSScreen.main
                 ?? NSScreen.screens.first
             if let screen {
                 let visible = screen.visibleFrame
-                let origin = NSPoint(x: visible.midX - size.width / 2, y: visible.minY + 24)
+                let origin = NSPoint(
+                    x: visible.midX - size.width / 2,
+                    y: visible.minY + 24 + bottomInset
+                )
                 panel.setFrame(NSRect(origin: origin, size: size), display: true)
             }
         }
@@ -74,7 +106,7 @@ final class SwitcherOverlay {
             }
         }
 
-        if isHovering {
+        if HUDHoverState.shared.anyHovering {
             hideTask?.cancel()
             hideTask = nil
         } else {
@@ -85,7 +117,7 @@ final class SwitcherOverlay {
     func hide() {
         hideTask?.cancel()
         hideTask = nil
-        isHovering = false
+        HUDHoverState.shared.setHovering(false, for: "carousel")
         guard let panel, panel.isVisible, panel.alphaValue > 0 else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.45
@@ -111,8 +143,11 @@ final class SwitcherOverlay {
     }
 
     private func hoverChanged(_ hovering: Bool) {
-        isHovering = hovering
-        if hovering {
+        HUDHoverState.shared.setHovering(hovering, for: "carousel")
+    }
+
+    private func sharedHoverChanged(_ anyHovering: Bool) {
+        if anyHovering {
             hideTask?.cancel()
             hideTask = nil
             // Interrupt an in-flight fade-out so the HUD revives under the cursor.
@@ -151,6 +186,9 @@ final class SwitcherOverlay {
         panel.hasShadow = true
         panel.ignoresMouseEvents = false
         panel.hidesOnDeactivate = false
+        // Always-dark HUD regardless of system appearance — the white
+        // text/icons depend on it.
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.contentView = hosting
         self.panel = panel
@@ -273,16 +311,4 @@ private struct SwitcherHUDView: View {
         }
         .onHover(perform: onHover)
     }
-}
-
-private struct HUDBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .hudWindow
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }

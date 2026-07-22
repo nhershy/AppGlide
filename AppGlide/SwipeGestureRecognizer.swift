@@ -9,6 +9,7 @@ import OpenMultitouchSupport
 enum SwipeDirection {
     case left
     case right
+    case down
 }
 
 /// Detects 3-finger horizontal swipe steps from raw multitouch frames.
@@ -35,6 +36,12 @@ struct SwipeGestureRecognizer {
         static let dominanceRatio: Float = 1.5
         /// Vertical travel beyond which a non-dominant gesture is abandoned.
         static let verticalAbort: Float = 0.10
+        /// Downward travel needed to fire the music HUD gesture.
+        static let downThreshold: Float = 0.10
+        /// MultitouchSupport normalized y grows upward (origin bottom-left),
+        /// so a swipe DOWN makes accY negative. Flip to +1 if the DEBUG log
+        /// in the vertical branch disproves this.
+        static let downwardYSign: Float = -1
         /// Tolerated duration of a momentary finger dropout mid-gesture; also
         /// the longest a 2-finger lead-in still counts as a staggered landing
         /// rather than a scroll.
@@ -149,7 +156,18 @@ struct SwipeGestureRecognizer {
             guard sawRequiredFingers else { return nil }
             if abs(accY) > Constants.verticalAbort,
                abs(accX) <= Constants.dominanceRatio * abs(accY) {
+                // Vertical gesture. Downward-dominant fires .down once;
+                // upward (or diagonal mush) belongs to Mission Control — fail
+                // silently. Either way latch .failed so neither horizontal
+                // steps nor a second .down can fire until every touch lifts.
+                #if DEBUG
+                NSLog("AppGlide: vertical accY=%.3f (expect negative for swipe DOWN)", accY)
+                #endif
+                let firesDown = !hasFired
+                    && Constants.downwardYSign * accY >= Constants.downThreshold
+                    && abs(accY) > Constants.dominanceRatio * abs(accX)
                 state = .failed
+                return firesDown ? .down : nil
             } else {
                 let threshold = hasFired ? glideStepDistance : firstStepDistance
                 if abs(accX) >= threshold,

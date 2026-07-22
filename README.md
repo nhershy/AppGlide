@@ -11,6 +11,7 @@ Switch between macOS apps with a 3-finger trackpad swipe, iPad-style. A lightwei
 | **Wrap** | The ring is circular — keep going in one direction and you'll come back around. |
 | **Hover the HUD** | Pins it open (it normally fades after ~1.5s). |
 | **Click a HUD icon** | Jumps straight to that app and pulls it in next to the current one on the ring, instead of rotating everything. |
+| **3-finger swipe down** | Toggles the Apple Music HUD: album art, track info, progress, previous/play-pause/next, favorite ♥, add to library, add-to-playlist menu, shuffle. Auto-hides after ~6s; hovering pins it. If the app carousel is visible, it lifts above the music pane. |
 
 The ring's order is persistent: it only re-sorts (most-recently-used first) when you switch apps some other way — Dock, Cmd-Tab, a click — or an app launches or quits. That's what makes "one swipe right, one swipe left" reliably toggle between two apps.
 
@@ -20,13 +21,14 @@ Both items live in the Settings window's **Status** section, with buttons that o
 
 1. **Free up the 3-finger gesture**: System Settings → Trackpad → More Gestures → set "Swipe between full-screen applications" to **Four Fingers** (or Off), and keep Three-Finger Drag off (Accessibility → Motor → Pointer Control → Trackpad Options). Otherwise macOS reacts to the same swipes.
 2. **Grant Accessibility** (Privacy & Security → Accessibility): used to tell real windows from phantom ones (apps like Notes keep an invisible window after you close the last one) and to unminimize windows when switching. Without it AppGlide still works, but window detection is less accurate.
+3. **Allow Automation for Music** (prompted on first use of the music HUD): AppGlide controls Apple Music via Apple Events. Recovery lives in Privacy & Security → Automation; the HUD itself shows a shortcut button if permission is missing.
 
 ## Settings
 
 Open via the gear on the HUD or the menu-bar icon → Settings…
 
 - **Status** — the two setup checks above, live.
-- **Gesture** — invert swipe direction; swipe distance (sensitivity — shorter = more sensitive); glide step distance; haptic feedback on/off.
+- **Gesture** — invert swipe direction; swipe distance (sensitivity — shorter = more sensitive); glide step distance; haptic feedback on/off; music HUD gesture on/off.
 - **Minimized Apps** — when all of an app's windows are minimized: unminimize on switch, or skip the app entirely.
 - **Excluded Apps** — check any app to banish it from the ring and HUD.
 - **HUD** — how long it stays visible after the last swipe.

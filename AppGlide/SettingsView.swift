@@ -36,6 +36,8 @@ struct SettingsView: View {
     @AppStorage(PrefKey.glideStepDistance) private var glideStepDistance = 0.10
     @AppStorage(PrefKey.hudDuration) private var hudDuration = 1.5
     @AppStorage(PrefKey.hapticsEnabled) private var hapticsEnabled = true
+    @AppStorage(PrefKey.musicHUDEnabled) private var musicHUDEnabled = true
+    @AppStorage(PrefKey.musicHudDuration) private var musicHudDuration = 2.0
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var status = SetupStatus.check()
 
@@ -89,6 +91,13 @@ struct SettingsView: View {
                     Slider(value: $hudDuration, in: 0.5...3.0)
                 }
             }
+            Section("Music") {
+                Toggle("3-finger swipe down shows Music controls", isOn: $musicHUDEnabled)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Stays visible for \(musicHudDuration, format: .number.precision(.fractionLength(1))) s")
+                    Slider(value: $musicHudDuration, in: 0.5...6.0)
+                }
+            }
             Section("General") {
                 Toggle("Pause switching", isOn: $isPaused)
                 Toggle("Launch at login", isOn: $launchAtLogin)
@@ -106,7 +115,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 640)
+        .frame(width: 440, height: 700)
         .onAppear { status = SetupStatus.check() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             status = SetupStatus.check()
