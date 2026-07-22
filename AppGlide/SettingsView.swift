@@ -34,10 +34,9 @@ struct SettingsView: View {
     @AppStorage(PrefKey.minimizedAppBehavior) private var minimizedBehavior = MinimizedAppBehavior.restore.rawValue
     @AppStorage(PrefKey.swipeDistance) private var swipeDistance = 0.08
     @AppStorage(PrefKey.glideStepDistance) private var glideStepDistance = 0.10
-    @AppStorage(PrefKey.hudDuration) private var hudDuration = 1.5
+    @AppStorage(PrefKey.hudDuration) private var hudDuration = 2.0
     @AppStorage(PrefKey.hapticsEnabled) private var hapticsEnabled = true
     @AppStorage(PrefKey.musicHUDEnabled) private var musicHUDEnabled = true
-    @AppStorage(PrefKey.musicHudDuration) private var musicHudDuration = 2.0
     @AppStorage(PrefKey.mouseScrollEnabled) private var mouseScrollEnabled = true
     @AppStorage(PrefKey.mouseScrollModifier) private var mouseScrollModifier = MouseScrollModifier.option.rawValue
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -99,15 +98,11 @@ struct SettingsView: View {
             Section("HUD") {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Stays visible for \(hudDuration, format: .number.precision(.fractionLength(1))) s")
-                    Slider(value: $hudDuration, in: 0.5...3.0)
+                    Slider(value: $hudDuration, in: 0.5...6.0)
                 }
             }
             Section("Music") {
                 Toggle("3-finger swipe down shows Music controls", isOn: $musicHUDEnabled)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Stays visible for \(musicHudDuration, format: .number.precision(.fractionLength(1))) s")
-                    Slider(value: $musicHudDuration, in: 0.5...6.0)
-                }
             }
             Section("General") {
                 Toggle("Pause switching", isOn: $isPaused)

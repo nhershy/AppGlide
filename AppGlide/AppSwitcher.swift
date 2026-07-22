@@ -13,7 +13,9 @@ import ApplicationServices
 /// apps by other means (Dock, Cmd-Tab, click) or an app launches or quits.
 final class AppSwitcher: NSObject {
     private enum Constants {
-        static let overlayHideDelay: Duration = .seconds(1.5)
+        /// Fallback when the shared "stays visible" pref is unset — matches
+        /// MusicOverlay.autoHideDelay so both HUDs default identically.
+        static let overlayHideDelay: Duration = .seconds(2)
         /// A swipe this soon after the previous one is part of a glide, so its
         /// activation is deferred until the user settles.
         static let rapidSwipeWindow: Duration = .milliseconds(350)

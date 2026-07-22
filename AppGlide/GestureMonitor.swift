@@ -16,7 +16,6 @@ enum PrefKey {
     static let hapticsEnabled = "hapticsEnabled"
     static let excludedBundleIDs = "excludedBundleIDs"
     static let musicHUDEnabled = "musicHUDEnabled"
-    static let musicHudDuration = "musicHudDuration"
     static let mouseScrollEnabled = "mouseScrollEnabled"
     static let mouseScrollModifier = "mouseScrollModifier"
     static let hasShownSetup = "hasShownSetup"

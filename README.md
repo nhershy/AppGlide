@@ -32,10 +32,11 @@ Both items live in the Settings window's **Status** section, with buttons that o
 Open via the gear on the HUD or the menu-bar icon → Settings…
 
 - **Status** — the two setup checks above, live.
-- **Gesture** — invert swipe direction; swipe distance (sensitivity — shorter = more sensitive); glide step distance; haptic feedback on/off; music HUD gesture on/off.
+- **Gesture** — invert swipe direction; swipe distance (sensitivity — shorter = more sensitive); glide step distance; haptic feedback on/off; modifier+scroll (Magic Mouse) on/off with modifier choice.
+- **Music** — the swipe-down music HUD gesture on/off.
 - **Minimized Apps** — when all of an app's windows are minimized: unminimize on switch, or skip the app entirely.
 - **Excluded Apps** — check any app to banish it from the ring and HUD.
-- **HUD** — how long it stays visible after the last swipe.
+- **HUD** — how long both HUDs stay visible after the last interaction (they always dismiss together).
 - **General** — pause switching; launch at login.
 
 ## Build & install

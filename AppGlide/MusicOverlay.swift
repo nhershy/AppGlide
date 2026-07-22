@@ -144,7 +144,8 @@ final class MusicOverlay {
     }
 
     private func scheduleAutoHide() {
-        let stored = UserDefaults.standard.double(forKey: PrefKey.musicHudDuration)
+        // Shared "stays visible" setting — one duration governs both HUDs.
+        let stored = UserDefaults.standard.double(forKey: PrefKey.hudDuration)
         let delay: Duration = stored > 0 ? .seconds(stored) : Self.autoHideDelay
         HUDAutoHide.shared.requestAutoHide(after: delay)
     }
