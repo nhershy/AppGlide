@@ -57,6 +57,10 @@ final class MusicController {
 
     private var cachedArtwork: (persistentID: String, image: NSImage?)?
 
+    /// setVolume coalescing state — only touched on the main actor.
+    private var volumeSendActive = false
+    private var pendingVolume: Int?
+
     nonisolated static var isMusicRunning: Bool {
         !NSRunningApplication.runningApplications(withBundleIdentifier: musicBundleID).isEmpty
     }
@@ -97,32 +101,37 @@ final class MusicController {
 
     // MARK: - State
 
-    func refresh() async -> MusicState {
-        guard Self.isMusicRunning else { return .notRunning }
+    /// Volume is the Music app's own `sound volume` (0–100), returned in both
+    /// script branches so it's known even when nothing is playing; nil on the
+    /// error paths so callers can keep the last known value.
+    func refresh() async -> (state: MusicState, volume: Int?) {
+        guard Self.isMusicRunning else { return (.notRunning, nil) }
         // Deliberately NO try/on error in the script: a TCC denial raises a
         // catchable AppleScript error, and swallowing it would masquerade as
         // "nothing playing". Errors must surface here.
         let source = """
         tell application "Music"
-            if player state is stopped then return {"stopped"}
+            if player state is stopped then return {"stopped", sound volume}
             set t to current track
             return {"ok", name of t, artist of t, album of t, ¬
                 (player state is playing), player position, duration of t, ¬
-                favorited of t, shuffle enabled, persistent ID of t}
+                favorited of t, shuffle enabled, persistent ID of t, sound volume}
         end tell
         """
         switch await Self.executeAsync(source) {
         case .failure(let error):
-            if error.code == Self.errAEEventNotPermitted { return .permissionDenied }
+            if error.code == Self.errAEEventNotPermitted { return (.permissionDenied, nil) }
             AppLog.log("Music refresh failed (\(error.code)) \(error.message)")
-            return .nothingPlaying
+            return (.nothingPlaying, nil)
         case .success(let descriptor):
-            guard descriptor.numberOfItems >= 1,
-                  descriptor.atIndex(1)?.stringValue == "ok",
-                  descriptor.numberOfItems >= 10 else {
-                return .nothingPlaying
+            guard descriptor.atIndex(1)?.stringValue == "ok",
+                  descriptor.numberOfItems >= 11 else {
+                let volume: Int? = descriptor.atIndex(1)?.stringValue == "stopped"
+                    ? descriptor.atIndex(2).map { Int($0.int32Value) }
+                    : nil
+                return (.nothingPlaying, volume)
             }
-            return .playing(NowPlaying(
+            let now = NowPlaying(
                 title: descriptor.atIndex(2)?.stringValue ?? "",
                 artist: descriptor.atIndex(3)?.stringValue ?? "",
                 album: descriptor.atIndex(4)?.stringValue ?? "",
@@ -132,7 +141,8 @@ final class MusicController {
                 favorited: descriptor.atIndex(8)?.booleanValue ?? false,
                 shuffle: descriptor.atIndex(9)?.booleanValue ?? false,
                 persistentID: descriptor.atIndex(10)?.stringValue ?? ""
-            ))
+            )
+            return (.playing(now), descriptor.atIndex(11).map { Int($0.int32Value) })
         }
     }
 
@@ -176,6 +186,21 @@ final class MusicController {
 
     func seek(to seconds: Double) async {
         await run("tell application \"Music\" to set player position to \(max(seconds, 0))")
+    }
+
+    /// Music-app volume, 0–100 (NOT system volume). The slider drag fires at
+    /// 60–120 Hz; one Apple Event per tick would backlog the serial queue for
+    /// seconds, so bursts coalesce last-write-wins: at most one event in
+    /// flight, always converging on the most recent value.
+    func setVolume(_ level: Int) async {
+        pendingVolume = min(max(level, 0), 100)
+        guard !volumeSendActive else { return }
+        volumeSendActive = true
+        while let level = pendingVolume {
+            pendingVolume = nil
+            await run("tell application \"Music\" to set sound volume to \(level)")
+        }
+        volumeSendActive = false
     }
 
     func addToLibrary() async {
@@ -292,6 +317,7 @@ final class MusicController {
 
     private nonisolated struct SearchResponse: Decodable {
         struct Item: Decodable {
+            let trackId: Int?
             let trackViewUrl: String?
             let collectionViewUrl: String?
             let artistViewUrl: String?
@@ -299,10 +325,9 @@ final class MusicController {
         let results: [Item]
     }
 
-    private nonisolated static func catalogURL(
-        for destination: MusicDestination,
-        now: NowPlaying
-    ) async -> URL? {
+    /// One iTunes Search API hit for the current track — shared by the
+    /// navigation deep links and Create Station.
+    private nonisolated static func searchItem(for now: NowPlaying) async -> SearchResponse.Item? {
         var components = URLComponents(string: "https://itunes.apple.com/search")!
         components.queryItems = [
             URLQueryItem(name: "term", value: "\(now.artist) \(now.title)"),
@@ -312,10 +337,17 @@ final class MusicController {
         ]
         guard let url = components.url,
               let (data, _) = try? await URLSession.shared.data(from: url),
-              let response = try? JSONDecoder().decode(SearchResponse.self, from: data),
-              let item = response.results.first else {
+              let response = try? JSONDecoder().decode(SearchResponse.self, from: data) else {
             return nil
         }
+        return response.results.first
+    }
+
+    private nonisolated static func catalogURL(
+        for destination: MusicDestination,
+        now: NowPlaying
+    ) async -> URL? {
+        guard let item = await searchItem(for: now) else { return nil }
         let target: String?
         switch destination {
         case .song: target = item.trackViewUrl
@@ -328,5 +360,35 @@ final class MusicController {
             urlString = "music://" + urlString.dropFirst("https://".count)
         }
         return URL(string: urlString)
+    }
+
+    /// Starts a radio station seeded from the current track, like Music's own
+    /// "Create Station". The scripting dictionary has no station verb, and the
+    /// iTunes-Radio-era itsradio://…/idsa.<id> scheme is silently swallowed by
+    /// modern Music — but every catalog song's station lives at
+    /// station/ra.<trackId>. Opening that link starts the station playing;
+    /// delivered without activating Music so the HUD keeps focus.
+    /// Returns false when the track has no catalog match (local files,
+    /// no network) so the UI can show feedback.
+    func createStation(for now: NowPlaying) async -> Bool {
+        guard Self.isMusicRunning else { return false }
+        guard let trackID = await Self.searchItem(for: now)?.trackId else {
+            AppLog.log("create station: no catalog match for \(now.artist) — \(now.title)")
+            return false
+        }
+        let country = (Locale.current.region?.identifier ?? "US").lowercased()
+        guard let url = URL(string: "music://music.apple.com/\(country)/station/ra.\(trackID)") else {
+            return false
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        do {
+            _ = try await NSWorkspace.shared.open(url, configuration: configuration)
+        } catch {
+            AppLog.log("create station: open failed \(error.localizedDescription)")
+            return false
+        }
+        AppLog.log("create station: ra.\(trackID) for \(now.artist) — \(now.title)")
+        return true
     }
 }

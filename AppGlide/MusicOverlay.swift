@@ -18,6 +18,11 @@ final class MusicHUDModel: ObservableObject {
     @Published var state: MusicState = .notRunning
     @Published var artwork: NSImage?
     @Published var playlists: [String] = []
+    /// Music-app volume 0–100; nil until the first refresh reports it.
+    @Published var volume: Int?
+    /// Lives here rather than view @State: the hosting view is never torn
+    /// down on hide, so only MusicOverlay can reliably reset the expansion.
+    @Published var volumeExpanded = false
 }
 
 /// Explicit menu-item target: SwiftUI Menu actions never dispatch from a
@@ -37,7 +42,7 @@ private final class PlaylistMenuTarget: NSObject {
 /// toggled by a 3-finger swipe down. Non-activating; hovering either HUD
 /// pins both open.
 final class MusicOverlay {
-    static let hudWidth: CGFloat = 460
+    static let hudWidth: CGFloat = 500
     /// Fixed height for all states: keeps the stacking offset known before
     /// layout and avoids frame churn when the state flips mid-display.
     static let hudHeight: CGFloat = 128
@@ -110,6 +115,7 @@ final class MusicOverlay {
     }
 
     func show() {
+        model.volumeExpanded = false
         let panel = ensurePanel()
         let size = NSSize(width: Self.hudWidth, height: Self.hudHeight)
         let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
@@ -150,6 +156,7 @@ final class MusicOverlay {
     func hide() {
         pollTask?.cancel()
         pollTask = nil
+        model.volumeExpanded = false
         HUDHoverState.shared.setHovering(false, for: "music")
         // Post at hide start so the carousel descends alongside the fade.
         NotificationCenter.default.post(
@@ -179,8 +186,9 @@ final class MusicOverlay {
             }
             while !Task.isCancelled {
                 guard let self else { return }
-                let state = await self.controller.refresh()
+                let (state, volume) = await self.controller.refresh()
                 self.model.state = state
+                if let volume { self.model.volume = volume }
                 if case .playing(let now) = state {
                     self.model.artwork = await self.controller.artwork(for: now.persistentID)
                 } else {
@@ -275,6 +283,20 @@ private struct MusicHUDView: View {
     @State private var artworkHovering = false
     @State private var barHovering = false
 
+    /// Volume twin of scrubFraction: while set, the slider follows the drag
+    /// instead of the poll, held briefly after release.
+    @State private var volumeFraction: Double?
+    @State private var volumeHovering = false
+    @State private var volumeCollapseTask: Task<Void, Never>?
+    /// Transient Create Station outcome, shown as a capsule toast over the HUD.
+    @State private var stationToast: (message: String, success: Bool)?
+
+    /// Optimistic toggle states: the poll only reflects a command on its next
+    /// 1s tick, so without these the tint lags a click by up to ~2s. Shown
+    /// immediately, held briefly, then the poll takes over without flicker.
+    @State private var shuffleOverride: Bool?
+    @State private var favoritedOverride: Bool?
+
     var body: some View {
         Group {
             switch model.state {
@@ -315,6 +337,11 @@ private struct MusicHUDView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 36)
                 .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        }
+        .overlay {
+            if let toast = stationToast {
+                stationToastView(toast)
+            }
         }
         .onHover(perform: onHover)
     }
@@ -513,23 +540,75 @@ private struct MusicHUDView: View {
     }
 
     private func controls(now: NowPlaying?) -> some View {
-        HStack(spacing: 16) {
+        let shuffleOn = shuffleOverride ?? (now?.shuffle == true)
+        let favorited = favoritedOverride ?? (now?.favorited == true)
+        return HStack(spacing: 16) {
             controlButton("backward.fill") { await controller.previous() }
+                .help("Previous")
             controlButton(
                 now?.isPlaying == true ? "pause.fill" : "play.fill",
                 size: 22,
                 hitSize: 34
             ) { await controller.playPause() }
+                .help(now?.isPlaying == true ? "Pause" : "Play")
             controlButton("forward.fill") { await controller.next() }
-            Spacer()
-            controlButton(
-                now?.favorited == true ? "heart.fill" : "heart",
-                tint: now?.favorited == true ? .red : nil
-            ) { await controller.toggleFavorite() }
-            controlButton("plus.circle") { await controller.addToLibrary() }
-            controlButton("text.badge.plus", size: 15) { onPlaylistMenu() }
-            controlButton("shuffle", tint: now?.shuffle == true ? .accentColor : nil) {
-                await controller.toggleShuffle()
+                .help("Next")
+            Spacer(minLength: 8)
+            // Right cluster: the speaker stays put as the collapse toggle; the
+            // buttons to its right crossfade into the volume slider.
+            HStack(spacing: 12) {
+                // ControlButton directly, not the helper: the toggle needs a
+                // synchronous withAnimation, not a Task-wrapped action.
+                ControlButton(
+                    symbol: speakerSymbol,
+                    size: 14,
+                    hitSize: 26,
+                    tint: model.volumeExpanded ? .accentColor : nil
+                ) {
+                    onInteract()
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        model.volumeExpanded.toggle()
+                    }
+                    if model.volumeExpanded {
+                        scheduleVolumeCollapse()
+                    } else {
+                        volumeCollapseTask?.cancel()
+                    }
+                }
+                .help("Volume")
+                if model.volumeExpanded {
+                    volumeSlider()
+                        .frame(width: 150)
+                        .padding(.trailing, 6)
+                        .transition(.opacity)
+                } else {
+                    Group {
+                        controlButton(
+                            favorited ? "heart.fill" : "heart",
+                            tint: favorited ? .red : nil
+                        ) {
+                            favoritedOverride = !favorited
+                            await controller.toggleFavorite()
+                            try? await Task.sleep(for: .milliseconds(1500))
+                            favoritedOverride = nil
+                        }
+                        .help(favorited ? "Unfavorite" : "Favorite")
+                        controlButton("plus.circle") { await controller.addToLibrary() }
+                            .help("Add to Library")
+                        controlButton("dot.radiowaves.left.and.right", size: 15) { await createStation(now) }
+                            .help("Create Station")
+                        controlButton("text.badge.plus", size: 15) { onPlaylistMenu() }
+                            .help("Add to Playlist")
+                        controlButton("shuffle", tint: shuffleOn ? .accentColor : nil) {
+                            shuffleOverride = !shuffleOn
+                            await controller.toggleShuffle()
+                            try? await Task.sleep(for: .milliseconds(1500))
+                            shuffleOverride = nil
+                        }
+                        .help("Shuffle")
+                    }
+                    .transition(.opacity)
+                }
             }
         }
     }
@@ -545,6 +624,134 @@ private struct MusicHUDView: View {
             onInteract()
             Task { await action() }
         }
+    }
+
+    /// Steps with the live level so the icon doubles as a readout. Glyph-width
+    /// differences are absorbed by ControlButton's fixed hitSize frame.
+    private var speakerSymbol: String {
+        let level = volumeFraction.map { Int(($0 * 100).rounded()) } ?? model.volume ?? 50
+        switch level {
+        case 0: return "speaker.slash.fill"
+        case ..<34: return "speaker.wave.1.fill"
+        case ..<67: return "speaker.wave.2.fill"
+        default: return "speaker.wave.3.fill"
+        }
+    }
+
+    /// The scrubber's layout and interaction model, minus the time labels,
+    /// bookended by min/max speaker icons. Sets the Music-app volume live
+    /// during the drag (safe — the controller coalesces the burst).
+    private func volumeSlider() -> some View {
+        let active = volumeHovering || volumeFraction != nil
+        return HStack(spacing: 8) {
+            Image(systemName: "speaker.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.5))
+            GeometryReader { geometry in
+                let fraction = volumeFraction ?? Double(model.volume ?? 50) / 100
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.white.opacity(0.15))
+                        .frame(height: active ? 6 : 4)
+                    Capsule()
+                        .fill(.white.opacity(active ? 0.9 : 0.75))
+                        .frame(width: max(geometry.size.width * fraction, 0), height: active ? 6 : 4)
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 11, height: 11)
+                        .offset(x: max(geometry.size.width * fraction - 5.5, 0))
+                        .opacity(active ? 1 : 0)
+                }
+                .frame(maxHeight: .infinity)
+                .animation(.easeOut(duration: 0.12), value: active)
+                .contentShape(Rectangle())
+                .onHover { volumeHovering = $0 }
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            onInteract()
+                            scheduleVolumeCollapse()
+                            let fraction = min(max(value.location.x / geometry.size.width, 0), 1)
+                            volumeFraction = fraction
+                            Task { await controller.setVolume(Int((fraction * 100).rounded())) }
+                        }
+                        .onEnded { value in
+                            let fraction = min(max(value.location.x / geometry.size.width, 0), 1)
+                            volumeFraction = fraction
+                            Task {
+                                await controller.setVolume(Int((fraction * 100).rounded()))
+                                // Hold the dragged level until the next poll
+                                // reflects it, so the slider doesn't snap back.
+                                try? await Task.sleep(for: .milliseconds(1200))
+                                volumeFraction = nil
+                            }
+                        }
+                )
+            }
+            .frame(height: 16)
+            Image(systemName: "speaker.wave.3.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.5))
+        }
+    }
+
+    /// Collapses the slider back to the action cluster after a few idle
+    /// seconds; rescheduled by every drag change.
+    private func scheduleVolumeCollapse() {
+        volumeCollapseTask?.cancel()
+        volumeCollapseTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.15)) {
+                model.volumeExpanded = false
+            }
+        }
+    }
+
+    private func createStation(_ now: NowPlaying?) async {
+        guard let now else { return }
+        let created = await controller.createStation(for: now)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
+            stationToast = created
+                ? (message: "Station created", success: true)
+                : (message: "Couldn't create station", success: false)
+        }
+        try? await Task.sleep(for: .milliseconds(1800))
+        withAnimation(.easeOut(duration: 0.4)) {
+            stationToast = nil
+        }
+    }
+
+    /// Springs in over the HUD with a blur-materialize, animated radio waves,
+    /// and a colored glow; blurs back out when dismissed.
+    private func stationToastView(_ toast: (message: String, success: Bool)) -> some View {
+        let glow: Color = toast.success ? .green : .orange
+        return HStack(spacing: 8) {
+            Image(systemName: toast.success ? "dot.radiowaves.left.and.right" : "exclamationmark.triangle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(glow)
+                .symbolEffect(.variableColor.iterative, options: .repeating, isActive: toast.success)
+            Text(toast.message)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(.ultraThinMaterial, in: Capsule())
+        .background(Capsule().fill(.black.opacity(0.5)))
+        .overlay(
+            Capsule().strokeBorder(
+                LinearGradient(
+                    colors: [glow.opacity(0.6), .white.opacity(0.25), glow.opacity(0.15)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                lineWidth: 1
+            )
+        )
+        .shadow(color: glow.opacity(0.45), radius: 16)
+        .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+        .transition(.blurReplace.combined(with: ScaleTransition(0.8)))
     }
 
     private func progressFraction(_ now: NowPlaying?) -> CGFloat {
