@@ -576,39 +576,44 @@ private struct MusicHUDView: View {
                     }
                 }
                 .help("Volume")
-                if model.volumeExpanded {
-                    volumeSlider()
-                        .frame(width: 150)
-                        .padding(.trailing, 6)
+                // Fixed swap width (exactly the five buttons' footprint) so
+                // the cluster — and the speaker beside it — never shifts when
+                // the slider swaps in; the shorter slider centers inside it.
+                Group {
+                    if model.volumeExpanded {
+                        volumeSlider()
+                            .frame(width: 150)
+                            .transition(.opacity)
+                    } else {
+                        HStack(spacing: 12) {
+                            controlButton(
+                                favorited ? "heart.fill" : "heart",
+                                tint: favorited ? .red : nil
+                            ) {
+                                favoritedOverride = !favorited
+                                await controller.toggleFavorite()
+                                try? await Task.sleep(for: .milliseconds(1500))
+                                favoritedOverride = nil
+                            }
+                            .help(favorited ? "Unfavorite" : "Favorite")
+                            controlButton("plus.circle") { await controller.addToLibrary() }
+                                .help("Add to Library")
+                            controlButton("dot.radiowaves.left.and.right", size: 15) { await createStation(now) }
+                                .help("Create Station")
+                            controlButton("text.badge.plus", size: 15) { onPlaylistMenu() }
+                                .help("Add to Playlist")
+                            controlButton("shuffle", tint: shuffleOn ? .accentColor : nil) {
+                                shuffleOverride = !shuffleOn
+                                await controller.toggleShuffle()
+                                try? await Task.sleep(for: .milliseconds(1500))
+                                shuffleOverride = nil
+                            }
+                            .help("Shuffle")
+                        }
                         .transition(.opacity)
-                } else {
-                    Group {
-                        controlButton(
-                            favorited ? "heart.fill" : "heart",
-                            tint: favorited ? .red : nil
-                        ) {
-                            favoritedOverride = !favorited
-                            await controller.toggleFavorite()
-                            try? await Task.sleep(for: .milliseconds(1500))
-                            favoritedOverride = nil
-                        }
-                        .help(favorited ? "Unfavorite" : "Favorite")
-                        controlButton("plus.circle") { await controller.addToLibrary() }
-                            .help("Add to Library")
-                        controlButton("dot.radiowaves.left.and.right", size: 15) { await createStation(now) }
-                            .help("Create Station")
-                        controlButton("text.badge.plus", size: 15) { onPlaylistMenu() }
-                            .help("Add to Playlist")
-                        controlButton("shuffle", tint: shuffleOn ? .accentColor : nil) {
-                            shuffleOverride = !shuffleOn
-                            await controller.toggleShuffle()
-                            try? await Task.sleep(for: .milliseconds(1500))
-                            shuffleOverride = nil
-                        }
-                        .help("Shuffle")
                     }
-                    .transition(.opacity)
                 }
+                .frame(width: 178)
             }
         }
     }
