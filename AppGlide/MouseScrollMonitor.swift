@@ -47,7 +47,8 @@ private nonisolated func mouseScrollTapCallback(
 final class MouseScrollMonitor {
     enum Constants {
         /// Points of accumulated travel per ring step (continuous devices).
-        static let stepDistance: Double = 50
+        /// Fallback when PrefKey.mouseStepDistance is unset.
+        static let stepDistance: Double = 120
         /// Downward points to toggle the music HUD (fires once, then latches).
         static let musicThreshold: Double = 60
         /// Same dominance rule as SwipeGestureRecognizer.
@@ -55,8 +56,9 @@ final class MouseScrollMonitor {
         /// Gap without a matching event that ends the gesture.
         static let idleReset: Duration = .milliseconds(250)
         /// Points per fixed-point line unit for classic wheels
-        /// (1 notch ≈ 1 line → ~2 notches per ring step).
-        static let legacyLineMultiplier: Double = 25
+        /// (1 notch ≈ 1 line → ~2 notches per ring step at the default
+        /// stepDistance; scaled with it so classic wheels keep that cadence).
+        static let legacyLineMultiplier: Double = 60
         /// Natural scrolling ON: fingers-right → positive pointDeltaAxis2.
         /// Flip to -1 if the DEBUG sample log disproves this.
         static let scrollSignForOlder: Double = 1
@@ -75,7 +77,15 @@ final class MouseScrollMonitor {
     private var musicLatched = false
     private var consumeMomentum = false
     private var lastMatchedAt: ContinuousClock.Instant?
+    private var pinnedByModifier = false
     private let clock = ContinuousClock()
+
+    /// User-tunable via Settings; falls back to the constant, like the
+    /// trackpad recognizer's distance prefs.
+    private var stepDistance: Double {
+        let stored = UserDefaults.standard.double(forKey: PrefKey.mouseStepDistance)
+        return stored > 0 ? stored : Constants.stepDistance
+    }
 
     init(gestureMonitor: GestureMonitor) {
         self.gestureMonitor = gestureMonitor
@@ -84,6 +94,7 @@ final class MouseScrollMonitor {
     func start() {
         guard tap == nil else { return }
         let mask = CGEventMask(1) << CGEventType.scrollWheel.rawValue
+            | CGEventMask(1) << CGEventType.flagsChanged.rawValue
         guard let port = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -105,6 +116,7 @@ final class MouseScrollMonitor {
     }
 
     func stop() {
+        clearModifierPin()
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
@@ -124,6 +136,12 @@ final class MouseScrollMonitor {
             if let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
+            return Unmanaged.passUnretained(event)
+        }
+        // Handled before the enabled/paused guards so a pin can never leak
+        // through a mid-hold settings change; never consumed.
+        if type == .flagsChanged {
+            handleFlagsChanged(event)
             return Unmanaged.passUnretained(event)
         }
         guard type == .scrollWheel else { return Unmanaged.passUnretained(event) }
@@ -152,6 +170,9 @@ final class MouseScrollMonitor {
         // shift/fn don't disqualify.
         let relevant = event.flags.intersection([.maskAlternate, .maskCommand, .maskControl])
         guard relevant == MouseScrollModifier.current(defaults).flag else {
+            // Also clears the pin in case a flagsChanged was missed while the
+            // tap was disabled.
+            clearModifierPin()
             resetGesture()
             consumeMomentum = false
             return Unmanaged.passUnretained(event)
@@ -182,23 +203,51 @@ final class MouseScrollMonitor {
         accRing += ringDelta
         accMusic += musicDelta
 
-        if abs(accRing) >= Constants.stepDistance,
+        if abs(accRing) >= stepDistance,
            abs(accRing) > Constants.dominanceRatio * abs(accMusic) {
             let direction: SwipeDirection = accRing > 0 ? .right : .left
             // Carry the remainder so detents stay evenly spaced; verticality
             // is judged per detent, like the trackpad recognizer.
-            accRing += accRing > 0 ? -Constants.stepDistance : Constants.stepDistance
+            accRing += accRing > 0 ? -stepDistance : stepDistance
             accMusic = 0
+            setModifierPin()
             gestureMonitor.dispatch(direction)
         } else if !musicLatched,
                   accMusic >= Constants.musicThreshold,
                   abs(accMusic) > Constants.dominanceRatio * abs(accRing) {
             musicLatched = true
             accRing = 0
+            setModifierPin()
             gestureMonitor.dispatch(.down)
         }
 
         return nil  // consume: the page behind must not scroll
+    }
+
+    /// Modifier went up (or changed) while the HUD was pinned: unpin so the
+    /// normal auto-hide countdown starts. consumeMomentum is deliberately
+    /// left alone — the momentum tail must keep being swallowed after release.
+    private func handleFlagsChanged(_ event: CGEvent) {
+        guard pinnedByModifier else { return }
+        let relevant = event.flags.intersection([.maskAlternate, .maskCommand, .maskControl])
+        if relevant != MouseScrollModifier.current(UserDefaults.standard).flag {
+            clearModifierPin()
+            resetGesture()
+        }
+    }
+
+    /// While the modifier is held after a step fired, keep the HUD up —
+    /// same pin registry the hover tracking uses.
+    private func setModifierPin() {
+        guard !pinnedByModifier else { return }
+        pinnedByModifier = true
+        HUDHoverState.shared.setHovering(true, for: "modifierHold")
+    }
+
+    private func clearModifierPin() {
+        guard pinnedByModifier else { return }
+        pinnedByModifier = false
+        HUDHoverState.shared.setHovering(false, for: "modifierHold")
     }
 
     private func resetGesture() {

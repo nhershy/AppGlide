@@ -12,8 +12,9 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// Shared hover tracking across the app-switcher and music HUDs: hovering
-/// either panel pins BOTH open; auto-hide resumes when the mouse leaves both.
+/// Shared pin tracking across the app-switcher and music HUDs — hover or a
+/// held scroll-modifier key: any pin holds BOTH panels open; auto-hide
+/// resumes when the last pin clears.
 @MainActor
 final class HUDHoverState {
     static let shared = HUDHoverState()

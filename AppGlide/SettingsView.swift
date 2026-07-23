@@ -39,6 +39,7 @@ struct SettingsView: View {
     @AppStorage(PrefKey.musicHUDEnabled) private var musicHUDEnabled = true
     @AppStorage(PrefKey.mouseScrollEnabled) private var mouseScrollEnabled = true
     @AppStorage(PrefKey.mouseScrollModifier) private var mouseScrollModifier = MouseScrollModifier.option.rawValue
+    @AppStorage(PrefKey.mouseStepDistance) private var mouseStepDistance = MouseScrollMonitor.Constants.stepDistance
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var status = SetupStatus.check()
     @State private var exclusionRows: [ExclusionRow] = []
@@ -65,6 +66,12 @@ struct SettingsView: View {
                         Text("⌃ Control").tag(MouseScrollModifier.control.rawValue)
                     }
                     .pickerStyle(.segmented)
+                    DistanceSlider(
+                        title: "Scroll distance per switch",
+                        subtitle: "Scroll travel needed per app — shorter is more sensitive",
+                        value: $mouseStepDistance,
+                        range: 60...250
+                    )
                 }
                 DistanceSlider(
                     title: "Swipe distance",

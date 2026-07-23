@@ -18,6 +18,7 @@ enum PrefKey {
     static let musicHUDEnabled = "musicHUDEnabled"
     static let mouseScrollEnabled = "mouseScrollEnabled"
     static let mouseScrollModifier = "mouseScrollModifier"
+    static let mouseStepDistance = "mouseStepDistance"
     static let hasShownSetup = "hasShownSetup"
     static let loginItemPath = "loginItemRegisteredPath"
 }
