@@ -6,7 +6,9 @@
 import Foundation
 import OpenMultitouchSupport
 
-enum PrefKey {
+/// nonisolated: pure constants, also read on the multitouch thread by
+/// MouseTouchMonitor's frame callback.
+nonisolated enum PrefKey {
     static let isPaused = "isPaused"
     static let reverseDirection = "reverseDirection"
     static let minimizedAppBehavior = "minimizedAppBehavior"

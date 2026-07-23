@@ -6,7 +6,9 @@
 import CoreGraphics
 import Foundation
 
-enum MouseScrollModifier: String {
+/// nonisolated: pure value logic, also read on the multitouch thread by
+/// MouseTouchMonitor's frame callback.
+nonisolated enum MouseScrollModifier: String {
     case option
     case command
     case control
@@ -222,6 +224,14 @@ final class MouseScrollMonitor {
         }
 
         return nil  // consume: the page behind must not scroll
+    }
+
+    /// Touch-peek (MouseTouchMonitor) routes its pin through here so the pin
+    /// stays owned by the object that observes the release. Never pin without
+    /// a live tap — no tap means no flagsChanged, so nothing could clear it.
+    func noteModifierActivity() {
+        guard tap != nil else { return }
+        setModifierPin()
     }
 
     /// Modifier went up (or changed) while the HUD was pinned: unpin so the

@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var musicController: MusicController?
     private var musicOverlay: MusicOverlay?
     private var mouseScrollMonitor: MouseScrollMonitor?
+    private var mouseTouchMonitor: MouseTouchMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let defaults = UserDefaults.standard
@@ -40,6 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mouse = MouseScrollMonitor(gestureMonitor: monitor)
         mouseScrollMonitor = mouse
         mouse.start()
+
+        let touch = MouseTouchMonitor(gestureMonitor: monitor, scrollMonitor: mouse)
+        mouseTouchMonitor = touch
+        touch.start()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -49,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        mouseTouchMonitor?.stop()
         mouseScrollMonitor?.stop()
         gestureMonitor?.stop()
     }
