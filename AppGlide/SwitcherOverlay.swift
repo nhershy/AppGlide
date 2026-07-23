@@ -129,7 +129,13 @@ final class SwitcherOverlay {
 
     private func scheduleAutoHide() {
         let stored = UserDefaults.standard.double(forKey: PrefKey.hudDuration)
-        let delay: Duration = stored > 0 ? .seconds(stored) : autoHideDelay
+        var delay: Duration = stored > 0 ? .seconds(stored) : autoHideDelay
+        // Never fade out before a pending settle commit fires — the app would
+        // activate "out of nowhere" after the HUD is gone.
+        let focus = FocusDelayPref.seconds()
+        if focus > 0 {
+            delay = max(delay, .seconds(focus + 0.3))
+        }
         HUDAutoHide.shared.requestAutoHide(after: delay)
     }
 

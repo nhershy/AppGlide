@@ -16,8 +16,9 @@ final class AppSwitcher: NSObject {
         /// Fallback when the shared "stays visible" pref is unset — matches
         /// MusicOverlay.autoHideDelay so both HUDs default identically.
         static let overlayHideDelay: Duration = .seconds(2)
-        /// A swipe this soon after the previous one is part of a glide, so its
-        /// activation is deferred until the user settles.
+        /// Instant mode (focus delay 0) only: a swipe this soon after the
+        /// previous one is part of a glide, so its activation is deferred by
+        /// settleDelay instead of committing immediately.
         static let rapidSwipeWindow: Duration = .milliseconds(350)
         static let settleDelay: Duration = .milliseconds(250)
     }
@@ -91,10 +92,11 @@ final class AppSwitcher: NSObject {
 
     /// step: +1 = older in MRU, -1 = newer. Wraps around at the ends.
     ///
-    /// Commit-on-settle: an isolated swipe activates its target immediately,
-    /// but further swipes in quick succession only move the cursor and HUD —
-    /// the selection activates once the user pauses, so a multi-step glide
-    /// raises one app instead of every app passed along the way.
+    /// Commit-on-settle: swipes only move the cursor and HUD; the selection
+    /// activates once it has rested for the focus-delay pref, so browsing
+    /// raises one app instead of every app passed along the way. At 0 the
+    /// legacy behavior applies: an isolated swipe commits instantly and only
+    /// rapid glides defer.
     func handleSwipe(step: Int) {
         pendingActivationPID = nil
         if session == nil {
@@ -124,14 +126,23 @@ final class AppSwitcher: NSObject {
         let isRapidGlide = lastSwipeAt.map { now - $0 < Constants.rapidSwipeWindow } ?? false
         lastSwipeAt = now
         commitTask?.cancel()
-        if isRapidGlide {
-            commitTask = Task { [weak self] in
-                try? await Task.sleep(for: Constants.settleDelay)
-                guard !Task.isCancelled else { return }
-                self?.commitSelection()
-            }
+        let delaySeconds = FocusDelayPref.seconds()
+        if delaySeconds > 0 {
+            scheduleCommit(after: .seconds(delaySeconds))
+        } else if isRapidGlide {
+            // Instant mode still defers mid-glide steps so a fast glide
+            // raises one app, not every app passed along the way.
+            scheduleCommit(after: Constants.settleDelay)
         } else {
             commitSelection()
+        }
+    }
+
+    private func scheduleCommit(after delay: Duration) {
+        commitTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self?.commitSelection()
         }
     }
 

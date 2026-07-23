@@ -14,6 +14,7 @@ nonisolated enum PrefKey {
     static let minimizedAppBehavior = "minimizedAppBehavior"
     static let swipeDistance = "swipeDistance"
     static let glideStepDistance = "glideStepDistance"
+    static let focusDelay = "focusDelay"
     static let hudDuration = "hudDuration"
     static let hapticsEnabled = "hapticsEnabled"
     static let excludedBundleIDs = "excludedBundleIDs"
@@ -40,6 +41,20 @@ enum MinimizedAppBehavior: String {
 
     static func current(_ defaults: UserDefaults = .standard) -> MinimizedAppBehavior {
         MinimizedAppBehavior(rawValue: defaults.string(forKey: PrefKey.minimizedAppBehavior) ?? "") ?? .restore
+    }
+}
+
+/// Stabilization delay: how long the selection must rest on an app before it
+/// activates. 0 = instant (legacy commit-on-settle behavior). Shared by
+/// AppSwitcher (commit timer), SwitcherOverlay (auto-hide clamp), and
+/// SettingsView (slider default).
+nonisolated enum FocusDelayPref {
+    static let defaultSeconds: Double = 0.5
+
+    static func seconds(_ defaults: UserDefaults = .standard) -> Double {
+        // object(forKey:), not double(forKey:) — a stored 0 is a legitimate
+        // value ("instant"), not "unset".
+        max(0, (defaults.object(forKey: PrefKey.focusDelay) as? Double) ?? defaultSeconds)
     }
 }
 
