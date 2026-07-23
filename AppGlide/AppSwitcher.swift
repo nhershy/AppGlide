@@ -44,6 +44,7 @@ final class AppSwitcher: NSObject {
     override init() {
         super.init()
         overlay.onSelectApp = { [weak self] pid in self?.jumpToApp(pid) }
+        overlay.hasPendingCommit = { [weak self] in self?.commitTask != nil }
         seedMRU()
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(
@@ -92,12 +93,14 @@ final class AppSwitcher: NSObject {
 
     /// step: +1 = older in MRU, -1 = newer. Wraps around at the ends.
     ///
-    /// Commit-on-settle: swipes only move the cursor and HUD; the selection
+    /// Timed mode: swipes only move the cursor and HUD; the selection
     /// activates once it has rested for the focus-delay pref, so browsing
     /// raises one app instead of every app passed along the way. At 0 the
     /// legacy behavior applies: an isolated swipe commits instantly and only
-    /// rapid glides defer.
-    func handleSwipe(step: Int) {
+    /// rapid glides defer. Manual mode: trackpad browsing never
+    /// auto-activates — ClickCommitMonitor calls commitNow() on a 3-finger
+    /// click — while mouse steps keep the timed path.
+    func handleSwipe(step: Int, source: SwipeSource) {
         pendingActivationPID = nil
         if session == nil {
             session = makeSession()
@@ -117,24 +120,32 @@ final class AppSwitcher: NSObject {
         }
         s.index = target
         session = s
-        overlay.show(apps: s.apps, selectedIndex: s.index)
-        if UserDefaults.standard.object(forKey: PrefKey.hapticsEnabled) as? Bool ?? true {
-            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-        }
 
+        // Commit decision runs before overlay.show so scheduleAutoHide sees
+        // accurate pending-commit state.
         let now = clock.now
         let isRapidGlide = lastSwipeAt.map { now - $0 < Constants.rapidSwipeWindow } ?? false
         lastSwipeAt = now
         commitTask?.cancel()
-        let delaySeconds = FocusDelayPref.seconds()
-        if delaySeconds > 0 {
-            scheduleCommit(after: .seconds(delaySeconds))
-        } else if isRapidGlide {
-            // Instant mode still defers mid-glide steps so a fast glide
-            // raises one app, not every app passed along the way.
-            scheduleCommit(after: Constants.settleDelay)
-        } else {
-            commitSelection()
+        commitTask = nil
+        // Manual mode (trackpad): browsing never auto-activates — the commit
+        // comes from ClickCommitMonitor on a 3-finger click.
+        if source == .mouse || ActivationMode.current() == .timed {
+            let delaySeconds = FocusDelayPref.seconds()
+            if delaySeconds > 0 {
+                scheduleCommit(after: .seconds(delaySeconds))
+            } else if isRapidGlide {
+                // Instant mode still defers mid-glide steps so a fast glide
+                // raises one app, not every app passed along the way.
+                scheduleCommit(after: Constants.settleDelay)
+            } else {
+                commitSelection()
+            }
+        }
+
+        overlay.show(apps: s.apps, selectedIndex: s.index)
+        if UserDefaults.standard.object(forKey: PrefKey.hapticsEnabled) as? Bool ?? true {
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         }
     }
 
@@ -144,6 +155,22 @@ final class AppSwitcher: NSObject {
             guard !Task.isCancelled else { return }
             self?.commitSelection()
         }
+    }
+
+    /// True while the carousel is live on screen — the window in which a
+    /// manual 3-finger click commits (and gets swallowed).
+    var isBrowsing: Bool { session != nil && overlay.isShowing }
+
+    /// Manual activation: commit the current selection and dismiss the HUD.
+    func commitNow() {
+        commitTask?.cancel()
+        commitTask = nil
+        guard session != nil else { return }
+        if UserDefaults.standard.object(forKey: PrefKey.hapticsEnabled) as? Bool ?? true {
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        }
+        commitSelection()
+        overlay.hide()
     }
 
     /// HUD icon clicked: instead of rotating the whole ring to the clicked

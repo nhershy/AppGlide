@@ -175,7 +175,7 @@ final class MouseTouchMonitor {
         if let last = lastPeekAt, now - last < Constants.peekRepeat { return }
         lastPeekAt = now
         scrollMonitor.noteModifierActivity()
-        gestureMonitor.dispatch(.peek)
+        gestureMonitor.dispatch(.peek, source: .mouse)
     }
 
     private func rebuild() {

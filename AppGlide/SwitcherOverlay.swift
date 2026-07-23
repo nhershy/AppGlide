@@ -13,6 +13,13 @@ import SwiftUI
 final class SwitcherOverlay {
     /// Called with the pid of an icon the user clicks in the HUD.
     var onSelectApp: ((pid_t) -> Void)?
+    /// Whether AppSwitcher has a commit timer running — the auto-hide clamp
+    /// must keep the HUD up until that commit fires.
+    var hasPendingCommit: (() -> Bool)?
+
+    /// True while the HUD is on screen and not faded out — the browsing
+    /// window in which a manual 3-finger click commits.
+    var isShowing: Bool { (panel?.isVisible ?? false) && (panel?.alphaValue ?? 0) > 0 }
 
     private var panel: NSPanel?
     private var hostingView: NSHostingView<SwitcherHUDView>?
@@ -131,9 +138,11 @@ final class SwitcherOverlay {
         let stored = UserDefaults.standard.double(forKey: PrefKey.hudDuration)
         var delay: Duration = stored > 0 ? .seconds(stored) : autoHideDelay
         // Never fade out before a pending settle commit fires — the app would
-        // activate "out of nowhere" after the HUD is gone.
+        // activate "out of nowhere" after the HUD is gone. Manual-mode
+        // trackpad browsing has no pending commit, but a mouse step (always
+        // timed) still needs the clamp.
         let focus = FocusDelayPref.seconds()
-        if focus > 0 {
+        if focus > 0, ActivationMode.current() == .timed || (hasPendingCommit?() ?? false) {
             delay = max(delay, .seconds(focus + 0.3))
         }
         HUDAutoHide.shared.requestAutoHide(after: delay)
