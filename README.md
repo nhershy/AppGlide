@@ -6,6 +6,8 @@
 
 Switch between macOS apps with a 3-finger trackpad swipe, iPad-style. A lightweight menu-bar utility: the windows of the app you glide to come straight to the front — no Cmd-Tab, no Spaces, no full-screen required.
 
+It's made for Mac users who live on a single desktop with overlapping windows — who don't use multiple desktops and never click the green button to full-screen their apps. macOS reserves the 3-finger swipe for exactly those two features and offers nothing for everyone else; AppGlide gives that gesture to the rest of us, switching between the apps themselves.
+
 ![The app-switcher ring with Safari selected, above the Apple Music HUD](pics/switcher-and-music-hud.png)
 
 ## Gestures
