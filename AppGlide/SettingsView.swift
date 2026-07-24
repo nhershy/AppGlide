@@ -37,7 +37,7 @@ private enum SliderCatalog {
     static let swipeDistance: [Double] = [0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12]
     static let glideStep: [Double] = [0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14]
     static let mouseStep: [Double] = [60, 75, 90, 105, 120, 135, 150, 165, 180]
-    static let focusDelay: [Double] = [0, 0.2, 0.35, 0.5, 0.75, 1.0, 1.5]
+    static let focusDelay: [Double] = [0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5]
     static let hudDuration: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 6.0]
 }
 

@@ -52,7 +52,7 @@ enum MinimizedAppBehavior: String {
 /// AppSwitcher (commit timer), SwitcherOverlay (auto-hide clamp), and
 /// SettingsView (slider default).
 nonisolated enum FocusDelayPref {
-    static let defaultSeconds: Double = 0.5
+    static let defaultSeconds: Double = 0.75
 
     static func seconds(_ defaults: UserDefaults = .standard) -> Double {
         // object(forKey:), not double(forKey:) — a stored 0 is a legitimate
