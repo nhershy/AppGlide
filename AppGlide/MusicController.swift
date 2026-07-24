@@ -176,12 +176,15 @@ final class MusicController {
     /// already near the start.
     func previous() async { await run("tell application \"Music\" to back track") }
 
-    func toggleFavorite() async {
-        await run("tell application \"Music\" to set favorited of current track to not favorited of current track")
+    /// Explicit target rather than a toggle: catalog tracks can report
+    /// favorited as false even after a successful favorite, so toggling off
+    /// the reported value would re-favorite on a click meant to unfavorite.
+    func setFavorited(_ favorited: Bool) async {
+        await run("tell application \"Music\" to set favorited of current track to \(favorited)")
     }
 
-    func toggleShuffle() async {
-        await run("tell application \"Music\" to set shuffle enabled to not shuffle enabled")
+    func setShuffle(_ enabled: Bool) async {
+        await run("tell application \"Music\" to set shuffle enabled to \(enabled)")
     }
 
     func seek(to seconds: Double) async {
@@ -203,15 +206,23 @@ final class MusicController {
         volumeSendActive = false
     }
 
-    func addToLibrary() async {
-        guard Self.isMusicRunning else { return }
+    func addToLibrary() async -> Bool {
+        guard Self.isMusicRunning else { return false }
         let primary = "tell application \"Music\" to duplicate current track to source \"Library\""
-        if case .failure(let error) = await Self.executeAsync(primary) {
-            if error.code == Self.errAENoSuchObject {
-                await run("tell application \"Music\" to duplicate current track to library playlist 1")
-            } else if error.code != 0 {
+        switch await Self.executeAsync(primary) {
+        case .success:
+            return true
+        case .failure(let error):
+            guard error.code == Self.errAENoSuchObject else {
                 AppLog.log("add to library failed (\(error.code)) \(error.message)")
+                return false
             }
+            let fallback = "tell application \"Music\" to duplicate current track to library playlist 1"
+            if case .failure(let error) = await Self.executeAsync(fallback) {
+                AppLog.log("add to library fallback failed (\(error.code)) \(error.message)")
+                return false
+            }
+            return true
         }
     }
 
@@ -234,7 +245,7 @@ final class MusicController {
     /// asynchronously (iCloud Music Library sync — can take many seconds), so
     /// the wait is a Swift-side retry of small quick scripts rather than one
     /// long blocking script: refresh polls interleave and the UI stays live.
-    func addToPlaylist(_ name: String) async {
+    func addToPlaylist(_ name: String) async -> Bool {
         func esc(_ s: String) -> String {
             s.replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
@@ -246,11 +257,11 @@ final class MusicController {
         switch await Self.executeAsync(direct) {
         case .success:
             AppLog.log("add to playlist \"\(name)\": direct")
-            return
+            return true
         case .failure(let error):
             guard error.code == -10006 else {
                 AppLog.log("add to playlist \"\(name)\" failed (\(error.code)) \(error.message)")
-                return
+                return false
             }
         }
 
@@ -270,7 +281,7 @@ final class MusicController {
               case let parts = combined.components(separatedBy: "\n"),
               parts.count >= 2 else {
             AppLog.log("add to playlist \"\(name)\": library add prep failed")
-            return
+            return false
         }
         let find = """
         tell application "Music"
@@ -282,15 +293,16 @@ final class MusicController {
         end tell
         """
         for attempt in 1...30 {
-            guard Self.isMusicRunning else { return }
+            guard Self.isMusicRunning else { return false }
             if case .success(let result) = await Self.executeAsync(find),
                result.stringValue == "done" {
                 AppLog.log("add to playlist \"\(name)\": two-step done (attempt \(attempt))")
-                return
+                return true
             }
             try? await Task.sleep(for: .seconds(1))
         }
         AppLog.log("add to playlist \"\(name)\": library copy never appeared within 30s")
+        return false
     }
 
     /// Explicit user action only (Open Music button).

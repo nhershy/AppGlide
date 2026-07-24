@@ -63,15 +63,14 @@ final class MusicOverlay {
         HUDAutoHide.shared.addExpireHandler { [weak self] in
             self?.hide()
         }
-        playlistMenuTarget.onSelect = { [weak self] name in
-            guard let self else { return }
-            Task { await self.controller.addToPlaylist(name) }
-        }
     }
 
     /// Pops the playlist menu natively. Blocks during menu tracking; the
     /// shared auto-hide is paused so the HUD can't vanish under an open menu.
-    private func showPlaylistMenu() {
+    /// The selection handler comes from the view so it can drive its own
+    /// feedback state (green button + toast).
+    private func showPlaylistMenu(onSelect: @escaping (String) -> Void) {
+        playlistMenuTarget.onSelect = onSelect
         HUDAutoHide.shared.cancel()
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -240,7 +239,7 @@ final class MusicOverlay {
             controller: controller,
             onHover: { [weak self] hovering in self?.hoverChanged(hovering) },
             onInteract: { [weak self] in self?.userDidInteract() },
-            onPlaylistMenu: { [weak self] in self?.showPlaylistMenu() }
+            onPlaylistMenu: { [weak self] onSelect in self?.showPlaylistMenu(onSelect: onSelect) }
         )
         let hosting = FirstMouseHostingView(rootView: root)
         let panel = NSPanel(
@@ -274,7 +273,7 @@ private struct MusicHUDView: View {
     let controller: MusicController
     let onHover: (Bool) -> Void
     let onInteract: () -> Void
-    let onPlaylistMenu: () -> Void
+    let onPlaylistMenu: (@escaping (String) -> Void) -> Void
 
     /// While set, the bar and elapsed label follow the drag instead of the
     /// poll; held briefly after seek so the bar doesn't snap back before the
@@ -288,14 +287,22 @@ private struct MusicHUDView: View {
     @State private var volumeFraction: Double?
     @State private var volumeHovering = false
     @State private var volumeCollapseTask: Task<Void, Never>?
-    /// Transient Create Station outcome, shown as a capsule toast over the HUD.
-    @State private var stationToast: (message: String, success: Bool)?
+    /// Transient action outcome (Create Station, Add to Library, Add to
+    /// Playlist), shown as a capsule toast over the HUD.
+    @State private var toast: (message: String, icon: String, success: Bool)?
+    @State private var toastTask: Task<Void, Never>?
 
-    /// Optimistic toggle states: the poll only reflects a command on its next
-    /// 1s tick, so without these the tint lags a click by up to ~2s. Shown
-    /// immediately, held briefly, then the poll takes over without flicker.
+    /// Optimistic toggle states: shown immediately on click, held until the
+    /// poll reads the same value back (catalog tracks may never read back
+    /// favorited = true, so the heart trusts the click for the life of the
+    /// current track) or the track changes.
     @State private var shuffleOverride: Bool?
     @State private var favoritedOverride: Bool?
+    /// Last polled persistent ID, to reset per-song state on track change.
+    @State private var trackID: String?
+    /// Per-song "added" confirmations: green until the track changes.
+    @State private var libraryAdded = false
+    @State private var playlistAdded = false
 
     var body: some View {
         Group {
@@ -339,11 +346,30 @@ private struct MusicHUDView: View {
                 .strokeBorder(.white.opacity(0.12), lineWidth: 1)
         }
         .overlay {
-            if let toast = stationToast {
-                stationToastView(toast)
+            if let toast {
+                toastView(toast)
             }
         }
         .onHover(perform: onHover)
+        .onChange(of: model.state) { _, newState in
+            guard case .playing(let now) = newState else {
+                favoritedOverride = nil
+                shuffleOverride = nil
+                libraryAdded = false
+                playlistAdded = false
+                return
+            }
+            if now.persistentID != trackID {
+                trackID = now.persistentID
+                favoritedOverride = nil   // never paint a stale heart on the next song
+                libraryAdded = false
+                playlistAdded = false
+            }
+            // Shuffle is player-global, not per-track: cleared only once the
+            // poll confirms, which it does reliably.
+            if let f = favoritedOverride, now.favorited == f { favoritedOverride = nil }
+            if let s = shuffleOverride, now.shuffle == s { shuffleOverride = nil }
+        }
     }
 
     /// Empty-state banner: icon medallion, title/caption, and actions either
@@ -590,23 +616,48 @@ private struct MusicHUDView: View {
                                 favorited ? "heart.fill" : "heart",
                                 tint: favorited ? .red : nil
                             ) {
-                                favoritedOverride = !favorited
-                                await controller.toggleFavorite()
-                                try? await Task.sleep(for: .milliseconds(1500))
-                                favoritedOverride = nil
+                                let target = !favorited
+                                favoritedOverride = target
+                                await controller.setFavorited(target)
                             }
                             .help(favorited ? "Unfavorite" : "Favorite")
-                            controlButton("plus.circle") { await controller.addToLibrary() }
-                                .help("Add to Library")
+                            controlButton(
+                                libraryAdded ? "checkmark.circle.fill" : "plus.circle",
+                                tint: libraryAdded ? .green : nil
+                            ) {
+                                if await controller.addToLibrary() {
+                                    withAnimation(.easeOut(duration: 0.15)) { libraryAdded = true }
+                                    showToast("Added to Library", icon: "checkmark.circle", success: true)
+                                } else {
+                                    showToast("Couldn't add to Library", icon: "", success: false)
+                                }
+                            }
+                            .help("Add to Library")
                             controlButton("dot.radiowaves.left.and.right", size: 15) { await createStation(now) }
                                 .help("Create Station")
-                            controlButton("text.badge.plus", size: 15) { onPlaylistMenu() }
-                                .help("Add to Playlist")
+                            controlButton(
+                                playlistAdded ? "text.badge.checkmark" : "text.badge.plus",
+                                size: 15,
+                                tint: playlistAdded ? .green : nil
+                            ) {
+                                onPlaylistMenu { name in
+                                    // Optimistic: the streaming-track path can
+                                    // take ~30s; a late failure reverts below.
+                                    withAnimation(.easeOut(duration: 0.15)) { playlistAdded = true }
+                                    showToast("Added to \u{201C}\(name)\u{201D}", icon: "checkmark.circle", success: true)
+                                    Task {
+                                        if await !controller.addToPlaylist(name) {
+                                            withAnimation(.easeOut(duration: 0.3)) { playlistAdded = false }
+                                            showToast("Couldn't add to \u{201C}\(name)\u{201D}", icon: "", success: false)
+                                        }
+                                    }
+                                }
+                            }
+                            .help("Add to Playlist")
                             controlButton("shuffle", tint: shuffleOn ? .accentColor : nil) {
-                                shuffleOverride = !shuffleOn
-                                await controller.toggleShuffle()
-                                try? await Task.sleep(for: .milliseconds(1500))
-                                shuffleOverride = nil
+                                let target = !shuffleOn
+                                shuffleOverride = target
+                                await controller.setShuffle(target)
                             }
                             .help("Shuffle")
                         }
@@ -716,29 +767,41 @@ private struct MusicHUDView: View {
     private func createStation(_ now: NowPlaying?) async {
         guard let now else { return }
         let created = await controller.createStation(for: now)
+        showToast(
+            created ? "Station created" : "Couldn't create station",
+            icon: "dot.radiowaves.left.and.right",
+            success: created
+        )
+    }
+
+    /// Presents the capsule toast, replacing any toast already showing —
+    /// cancelling its pending dismissal so back-to-back outcomes each get
+    /// their full display time.
+    private func showToast(_ message: String, icon: String, success: Bool) {
+        toastTask?.cancel()
         withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
-            stationToast = created
-                ? (message: "Station created", success: true)
-                : (message: "Couldn't create station", success: false)
+            toast = (message, icon, success)
         }
-        try? await Task.sleep(for: .milliseconds(1800))
-        withAnimation(.easeOut(duration: 0.4)) {
-            stationToast = nil
+        toastTask = Task {
+            try? await Task.sleep(for: .milliseconds(1800))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.4)) { toast = nil }
         }
     }
 
-    /// Springs in over the HUD with a blur-materialize, animated radio waves,
+    /// Springs in over the HUD with a blur-materialize, the caller's icon,
     /// and a colored glow; blurs back out when dismissed.
-    private func stationToastView(_ toast: (message: String, success: Bool)) -> some View {
+    private func toastView(_ toast: (message: String, icon: String, success: Bool)) -> some View {
         let glow: Color = toast.success ? .green : .orange
         return HStack(spacing: 8) {
-            Image(systemName: toast.success ? "dot.radiowaves.left.and.right" : "exclamationmark.triangle.fill")
+            Image(systemName: toast.success ? toast.icon : "exclamationmark.triangle.fill")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(glow)
                 .symbolEffect(.variableColor.iterative, options: .repeating, isActive: toast.success)
             Text(toast.message)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
+                .lineLimit(1)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
