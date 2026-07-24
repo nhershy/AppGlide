@@ -1,6 +1,12 @@
+<p align="center">
+  <img src="pics/logo.png" width="160" alt="AppGlide icon — a hand swiping with three fingers">
+</p>
+
 # AppGlide
 
 Switch between macOS apps with a 3-finger trackpad swipe, iPad-style. A lightweight menu-bar utility: the windows of the app you glide to come straight to the front — no Cmd-Tab, no Spaces, no full-screen required.
+
+![The app-switcher ring with Safari selected, above the Apple Music HUD](pics/switcher-and-music-hud.png)
 
 ## Gestures
 
