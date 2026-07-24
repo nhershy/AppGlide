@@ -13,6 +13,35 @@ extension Notification.Name {
     static let musicHUDVisibilityChanged = Notification.Name("musicHUDVisibilityChanged")
 }
 
+/// Order of the HUD's "Add to Playlist" menu.
+enum PlaylistSortOrder: String {
+    /// Most recently picked playlists first, then the rest alphabetically.
+    case recentlyPicked
+    case alphabetical
+
+    static func current(_ defaults: UserDefaults = .standard) -> PlaylistSortOrder {
+        PlaylistSortOrder(rawValue: defaults.string(forKey: PrefKey.playlistSortOrder) ?? "") ?? .recentlyPicked
+    }
+}
+
+/// Persisted most-recently-picked playlist names (identity is the name —
+/// the AppleScript flow has no stable IDs). Most recent first.
+enum PlaylistMRU {
+    /// Bounded so renamed/deleted playlists eventually age out of defaults.
+    static let maxEntries = 50
+
+    static func read(_ defaults: UserDefaults = .standard) -> [String] {
+        defaults.stringArray(forKey: PrefKey.recentPlaylistPicks) ?? []
+    }
+
+    static func record(_ name: String, _ defaults: UserDefaults = .standard) {
+        var names = read(defaults)
+        names.removeAll { $0 == name }
+        names.insert(name, at: 0)
+        defaults.set(Array(names.prefix(maxEntries)), forKey: PrefKey.recentPlaylistPicks)
+    }
+}
+
 @MainActor
 final class MusicHUDModel: ObservableObject {
     @Published var state: MusicState = .notRunning
@@ -74,7 +103,10 @@ final class MusicOverlay {
     /// The selection handler comes from the view so it can drive its own
     /// feedback state (green button + toast).
     private func showPlaylistMenu(onSelect: @escaping (String) -> Void) {
-        playlistMenuTarget.onSelect = onSelect
+        playlistMenuTarget.onSelect = { name in
+            PlaylistMRU.record(name)
+            onSelect(name)
+        }
         HUDAutoHide.shared.cancel()
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -83,7 +115,7 @@ final class MusicOverlay {
             item.isEnabled = false
             menu.addItem(item)
         } else {
-            for name in model.playlists {
+            for name in orderedPlaylists() {
                 let item = NSMenuItem(
                     title: name,
                     action: #selector(PlaylistMenuTarget.fire(_:)),
@@ -100,6 +132,18 @@ final class MusicOverlay {
         if isVisible, !HUDHoverState.shared.anyHovering {
             scheduleAutoHide()
         }
+    }
+
+    /// Menu display order. Recently-picked mode: MRU names first (skipping any
+    /// no longer in the fetched list), then the remaining playlists in Music's
+    /// alphabetical order. Computed at build time so a pick reorders the very
+    /// next menu open without re-fetching.
+    private func orderedPlaylists() -> [String] {
+        guard PlaylistSortOrder.current() == .recentlyPicked else { return model.playlists }
+        let available = Set(model.playlists)
+        let recent = PlaylistMRU.read().filter { available.contains($0) }
+        let recentSet = Set(recent)
+        return recent + model.playlists.filter { !recentSet.contains($0) }
     }
 
     var isVisible: Bool {

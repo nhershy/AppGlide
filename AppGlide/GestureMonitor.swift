@@ -20,6 +20,8 @@ nonisolated enum PrefKey {
     static let hapticsEnabled = "hapticsEnabled"
     static let excludedBundleIDs = "excludedBundleIDs"
     static let musicHUDEnabled = "musicHUDEnabled"
+    static let playlistSortOrder = "playlistSortOrder"
+    static let recentPlaylistPicks = "recentPlaylistPicks"
     static let mouseScrollEnabled = "mouseScrollEnabled"
     static let mouseScrollModifier = "mouseScrollModifier"
     static let mouseStepDistance = "mouseStepDistance"

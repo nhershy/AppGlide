@@ -51,6 +51,7 @@ struct SettingsView: View {
     @AppStorage(PrefKey.hudDuration) private var hudDuration = 1.5
     @AppStorage(PrefKey.hapticsEnabled) private var hapticsEnabled = true
     @AppStorage(PrefKey.musicHUDEnabled) private var musicHUDEnabled = true
+    @AppStorage(PrefKey.playlistSortOrder) private var playlistSortOrder = PlaylistSortOrder.recentlyPicked.rawValue
     @AppStorage(PrefKey.mouseScrollEnabled) private var mouseScrollEnabled = true
     @AppStorage(PrefKey.mouseScrollModifier) private var mouseScrollModifier = MouseScrollModifier.option.rawValue
     @AppStorage(PrefKey.mouseStepDistance) private var mouseStepDistance = MouseScrollMonitor.Constants.stepDistance
@@ -135,6 +136,13 @@ struct SettingsView: View {
                     maxLabel: "Long"
                 )
                 Toggle("3-finger swipe down shows Music controls", isOn: $musicHUDEnabled)
+                if musicHUDEnabled {
+                    Picker("Order of the \u{201C}Add to Playlist\u{201D} menu", selection: $playlistSortOrder) {
+                        Text("Recently picked first").tag(PlaylistSortOrder.recentlyPicked.rawValue)
+                        Text("Alphabetical").tag(PlaylistSortOrder.alphabetical.rawValue)
+                    }
+                    .pickerStyle(.radioGroup)
+                }
             }
             Section("General") {
                 Toggle("Pause switching", isOn: $isPaused)
