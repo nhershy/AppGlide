@@ -16,11 +16,38 @@ struct NowPlaying: Equatable {
     var duration: Double
     var favorited: Bool
     var shuffle: Bool
+    var repeatMode: RepeatMode
     var persistentID: String
     /// True while the station started from the HUD is still driving playback.
     /// Maintained by the controller's station latch — Music's scripting
     /// interface cannot report this itself (see the latch comment).
     var isStation: Bool
+}
+
+enum RepeatMode: String, Equatable {
+    case off
+    case all
+    case one
+
+    /// Music's `song repeat` comes back as a typeEnumerated descriptor whose
+    /// enumCodeValue is a four-char OSType: 'kRpO' off, 'kRpA' all, 'kRp1' one.
+    init?(enumCode: OSType) {
+        switch enumCode {
+        case 0x6B52704F: self = .off   // 'kRpO'
+        case 0x6B527041: self = .all   // 'kRpA'
+        case 0x6B527031: self = .one   // 'kRp1'
+        default: return nil
+        }
+    }
+
+    /// Music.app's own button cycle: off → all → one → off.
+    var next: RepeatMode {
+        switch self {
+        case .off: return .all
+        case .all: return .one
+        case .one: return .off
+        }
+    }
 }
 
 enum MusicState: Equatable {
@@ -227,7 +254,8 @@ final class MusicController {
             end if
             return {"ok", name of t, artist of t, album of t, ¬
                 (player state is playing), player position, duration of t, ¬
-                favorited of t, shuffle enabled, persistent ID of t, sound volume, streamed}
+                favorited of t, shuffle enabled, persistent ID of t, sound volume, streamed, ¬
+                song repeat}
         end tell
         """
         switch await Self.executeAsync(source) {
@@ -240,7 +268,7 @@ final class MusicController {
             return (.nothingPlaying, nil)
         case .success(let descriptor):
             guard descriptor.atIndex(1)?.stringValue == "ok",
-                  descriptor.numberOfItems >= 12 else {
+                  descriptor.numberOfItems >= 13 else {
                 clearStationLatch("playback stopped")
                 let volume: Int? = descriptor.atIndex(1)?.stringValue == "stopped"
                     ? descriptor.atIndex(2).map { Int($0.int32Value) }
@@ -265,6 +293,7 @@ final class MusicController {
                 duration: duration,
                 favorited: descriptor.atIndex(8)?.booleanValue ?? false,
                 shuffle: descriptor.atIndex(9)?.booleanValue ?? false,
+                repeatMode: descriptor.atIndex(13).flatMap { RepeatMode(enumCode: $0.enumCodeValue) } ?? .off,
                 persistentID: trackID,
                 isStation: stationLatched
             )
@@ -317,6 +346,10 @@ final class MusicController {
 
     func setShuffle(_ enabled: Bool) async {
         await run("tell application \"Music\" to set shuffle enabled to \(enabled)")
+    }
+
+    func setRepeat(_ mode: RepeatMode) async {
+        await run("tell application \"Music\" to set song repeat to \(mode.rawValue)")
     }
 
     func seek(to seconds: Double) async {

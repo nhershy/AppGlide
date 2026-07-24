@@ -71,7 +71,7 @@ private final class PlaylistMenuTarget: NSObject {
 /// toggled by a 3-finger swipe down. Non-activating; hovering either HUD
 /// pins both open.
 final class MusicOverlay {
-    static let hudWidth: CGFloat = 500
+    static let hudWidth: CGFloat = 540
     /// Fixed height for all states: keeps the stacking offset known before
     /// layout and avoids frame churn when the state flips mid-display.
     static let hudHeight: CGFloat = 128
@@ -370,6 +370,7 @@ private struct MusicHUDView: View {
     /// favorited = true, so the heart trusts the click for the life of the
     /// current track) or the track changes.
     @State private var shuffleOverride: Bool?
+    @State private var repeatOverride: RepeatMode?
     @State private var favoritedOverride: Bool?
     /// Optimistic Create Station: green immediately on click, bridging the
     /// few seconds until Music opens the deep link and the poll's isStation
@@ -433,6 +434,7 @@ private struct MusicHUDView: View {
             guard case .playing(let now) = newState else {
                 favoritedOverride = nil
                 shuffleOverride = nil
+                repeatOverride = nil
                 stationOverride = nil
                 libraryAdded = false
                 playlistAdded = false
@@ -444,12 +446,13 @@ private struct MusicHUDView: View {
                 libraryAdded = false
                 playlistAdded = false
             }
-            // Shuffle and station are player-global, not per-track: cleared
-            // only once the poll confirms — never on track change, since a
-            // just-created station's first track IS a track change and the
-            // override exists exactly to cover that window.
+            // Shuffle, repeat, and station are player-global, not per-track:
+            // cleared only once the poll confirms — never on track change,
+            // since a just-created station's first track IS a track change and
+            // the override exists exactly to cover that window.
             if let f = favoritedOverride, now.favorited == f { favoritedOverride = nil }
             if let s = shuffleOverride, now.shuffle == s { shuffleOverride = nil }
+            if let r = repeatOverride, now.repeatMode == r { repeatOverride = nil }
             if stationOverride == true, now.isStation { stationOverride = nil }
         }
     }
@@ -649,6 +652,7 @@ private struct MusicHUDView: View {
 
     private func controls(now: NowPlaying?) -> some View {
         let shuffleOn = shuffleOverride ?? (now?.shuffle == true)
+        let repeatMode = repeatOverride ?? (now?.repeatMode ?? .off)
         let favorited = favoritedOverride ?? (now?.favorited == true)
         let stationActive = stationOverride ?? (now?.isStation == true)
         return HStack(spacing: 16) {
@@ -685,13 +689,13 @@ private struct MusicHUDView: View {
                     }
                 }
                 .help("Volume")
-                // Fixed swap width (exactly the five buttons' footprint) so
+                // Fixed swap width (exactly the six buttons' footprint) so
                 // the cluster — and the speaker beside it — never shifts when
                 // the slider swaps in; the shorter slider centers inside it.
                 Group {
                     if model.volumeExpanded {
                         volumeSlider()
-                            .frame(width: 150)
+                            .frame(width: 180)
                             .transition(.opacity)
                     } else {
                         HStack(spacing: 12) {
@@ -756,11 +760,28 @@ private struct MusicHUDView: View {
                                 await controller.setShuffle(target)
                             }
                             .help(stationActive ? "Shuffle unavailable for stations" : "Shuffle")
+                            // Repeat is player-global like shuffle, and
+                            // stations ignore it too.
+                            controlButton(
+                                repeatMode == .one ? "repeat.1" : "repeat",
+                                tint: repeatMode == .off ? nil : .accentColor,
+                                enabled: !stationActive
+                            ) {
+                                let target = repeatMode.next
+                                repeatOverride = target
+                                await controller.setRepeat(target)
+                            }
+                            .help(
+                                stationActive ? "Repeat unavailable for stations"
+                                    : repeatMode == .all ? "Repeat All"
+                                    : repeatMode == .one ? "Repeat One"
+                                    : "Repeat"
+                            )
                         }
                         .transition(.opacity)
                     }
                 }
-                .frame(width: 178)
+                .frame(width: 216)
             }
         }
     }
