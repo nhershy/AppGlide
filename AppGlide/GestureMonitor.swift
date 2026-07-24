@@ -3,6 +3,7 @@
 //  AppGlide
 //
 
+import AppKit
 import Foundation
 import OpenMultitouchSupport
 
@@ -60,6 +61,16 @@ nonisolated enum FocusDelayPref {
 
 /// Consumes the global multitouch stream and forwards recognized swipes to the switcher.
 final class GestureMonitor {
+    private enum Constants {
+        /// NSWorkspace.didWake fires before the built-in trackpad re-enumerates;
+        /// OpenMultitouchSupport rebinds its MTDevice exactly then and can latch
+        /// a dead handle, killing the touch stream until the listener is torn
+        /// down and rebuilt. Successive delays: restart at ~3s (pad usually
+        /// back) and ~10s (backstop — MTDeviceIsAvailable can still be false at
+        /// 3s, which makes a restart silently no-op).
+        static let wakeRestartDelays: [Duration] = [.seconds(3), .seconds(7)]
+    }
+
     /// Fired on a 3-finger swipe down (music HUD toggle); wired by AppDelegate.
     var onMusicGesture: (() -> Void)?
 
@@ -71,6 +82,8 @@ final class GestureMonitor {
     private let switcher: AppSwitcher
     private var recognizer = SwipeGestureRecognizer()
     private var task: Task<Void, Never>?
+    private var wakeObserver: NSObjectProtocol?
+    private var wakeRecoveryTask: Task<Void, Never>?
 
     init(switcher: AppSwitcher) {
         self.switcher = switcher
@@ -78,6 +91,13 @@ final class GestureMonitor {
 
     func start() {
         guard task == nil else { return }
+        if wakeObserver == nil {
+            wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scheduleWakeRecovery() }
+            }
+        }
         if !OMSManager.shared.startListening() {
             AppLog.log("failed to start multitouch listener")
         }
@@ -93,7 +113,40 @@ final class GestureMonitor {
         task?.cancel()
         task = nil
         trackpadFingersDown = 0
+        // Fingers down at lid close never see their lift frame; drop any
+        // latched tracking/failed state so the rebuilt stream starts clean.
+        recognizer = SwipeGestureRecognizer()
         OMSManager.shared.stopListening()
+        // wakeObserver stays registered: stop() is also the first half of
+        // restart(), and the only unconditional stop is at app termination.
+    }
+
+    /// Each wake replaces any pending recovery so rapid sleep/wake cycles
+    /// never stack restarts and delays count from the latest wake.
+    private func scheduleWakeRecovery() {
+        AppLog.log("trackpad: system woke, scheduling multitouch stream restarts")
+        wakeRecoveryTask?.cancel()
+        wakeRecoveryTask = Task { [weak self] in
+            var elapsed = Duration.zero
+            for delay in Constants.wakeRestartDelays {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled, let self else { return }
+                elapsed += delay
+                self.restart(reason: "post-wake T+\(elapsed)")
+            }
+        }
+    }
+
+    /// Full teardown/rebuild of the OMS listener: dropping the last listener
+    /// makes the vendored manager MTDeviceStop/Release its device, re-adding
+    /// runs a fresh MTDeviceCreateDefault — the in-process equivalent of
+    /// relaunching the app. Never cancels wakeRecoveryTask (that task is the
+    /// caller).
+    private func restart(reason: String) {
+        AppLog.log("trackpad: restarting multitouch stream (\(reason))")
+        stop()
+        start()
+        AppLog.log("trackpad: restart done, listening=\(OMSManager.shared.isListening)")
     }
 
     private func handle(_ frame: [OMSTouchData]) {
