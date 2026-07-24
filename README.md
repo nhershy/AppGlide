@@ -18,14 +18,14 @@ Grab the DMG from the [latest release](https://github.com/nhershy/AppGlide/relea
 
 | Gesture | What it does |
 |---|---|
-| **Flick** — quick 3-finger swipe left/right | Switches to the next/previous app immediately. Swipe right goes to the previous (older) app; swipe left goes forward. |
-| **Glide (scrub)** — swipe and keep fingers down | Steps through one app per detent of travel, with a haptic tick each step. Reverse direction mid-glide to step back. The selected app activates once the selection holds still for the focus delay (default 0.5s, tunable in Settings → Switching). |
+| **Flick** — quick 3-finger swipe left/right | Switches to the next/previous app in one motion. Swipe right goes to the previous (older) app; swipe left goes forward. |
+| **Glide (scrub)** — swipe and keep fingers down | Steps through one app per detent of travel, with a haptic tick each step. Reverse direction mid-glide to step back. The selected app activates once the selection holds still for the focus delay (default 0.75s, tunable in Settings → Switching). |
 | **Wrap** | The ring is circular — keep going in one direction and you'll come back around. |
-| **3-finger click** (while the switcher is up) | Quits the app currently selected in the carousel. |
 | **Hover the HUD** | Pins it open (it normally fades after the visible duration, 1.5s by default). |
 | **Click a HUD icon** | Jumps straight to that app and pulls it in next to the current one on the ring, instead of rotating everything. |
-| **Right-click a HUD icon** | Quits that app. |
-| **3-finger swipe down** | Toggles the Apple Music HUD: album art, track info, progress scrubber, volume, previous/play-pause/next, favorite ♥, add to library, add-to-playlist menu, shuffle, Create Station. It shares the HUD visible duration; hovering pins it. If the app carousel is visible, it lifts above the music pane. |
+| **3-finger click** (while the switcher is up; trackpad only) | Quits the app currently selected in the carousel. |
+| **Right-click a HUD icon** (any pointer — mouse or trackpad) | Quits that app. |
+| **3-finger swipe down** | Toggles the Apple Music HUD: album art, track info, progress scrubber, volume, previous/play-pause/next, favorite ♥, add to library, add-to-playlist menu (recently picked playlists first), shuffle, repeat, Create Station. Clicking the album art, track, artist, or album opens it in Apple Music. It shares the HUD visible duration; hovering pins it. If the app carousel is visible, it lifts above the music pane. |
 
 The ring's order is persistent: it only re-sorts (most-recently-used first) when you switch apps some other way — Dock, Cmd-Tab, a click — or an app launches or quits. That's what makes "one swipe right, one swipe left" reliably toggle between two apps.
 
@@ -49,7 +49,7 @@ Open via the gear on the HUD or the menu-bar icon → Settings…
 - **Trackpad** — invert swipe direction; haptic feedback on/off; swipe distance (sensitivity — shorter = more sensitive); glide step distance.
 - **Magic Mouse** — modifier+scroll on/off; modifier choice (⌥/⌘/⌃); scroll distance per switch.
 - **Switching** — focus delay (Instant → 1.5s) before the selected app is raised; when all of an app's windows are minimized: unminimize on switch, or skip the app entirely.
-- **Heads-Up Display** — how long both HUDs stay visible after the last interaction (they always dismiss together); the swipe-down music HUD on/off.
+- **Heads-Up Display** — how long both HUDs stay visible after the last interaction (they always dismiss together); the swipe-down music HUD on/off; whether the "Add to Playlist" menu lists recently picked playlists first or goes alphabetical.
 - **General** — pause switching; launch at login.
 - **Excluded Apps** — check any app to banish it from the ring and HUD.
 
