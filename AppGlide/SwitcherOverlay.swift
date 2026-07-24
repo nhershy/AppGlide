@@ -13,12 +13,11 @@ import SwiftUI
 final class SwitcherOverlay {
     /// Called with the pid of an icon the user clicks in the HUD.
     var onSelectApp: ((pid_t) -> Void)?
-    /// Whether AppSwitcher has a commit timer running — the auto-hide clamp
-    /// must keep the HUD up until that commit fires.
-    var hasPendingCommit: (() -> Bool)?
+    /// Called with the pid of an icon the user right-clicks in the HUD.
+    var onCloseApp: ((pid_t) -> Void)?
 
     /// True while the HUD is on screen and not faded out — the browsing
-    /// window in which a manual 3-finger click commits.
+    /// window in which a 3-finger click quits the selection.
     var isShowing: Bool { (panel?.isVisible ?? false) && (panel?.alphaValue ?? 0) > 0 }
 
     private var panel: NSPanel?
@@ -84,7 +83,8 @@ final class SwitcherOverlay {
             selectedIndex: clampedIndex,
             onHover: { [weak self] hovering in self?.hoverChanged(hovering) },
             onSettings: { [weak self] in self?.openSettings() },
-            onSelect: { [weak self] pid in self?.onSelectApp?(pid) }
+            onSelect: { [weak self] pid in self?.onSelectApp?(pid) },
+            onClose: { [weak self] pid in self?.onCloseApp?(pid) }
         )
 
         let panel = ensurePanel(rootView: root)
@@ -138,11 +138,9 @@ final class SwitcherOverlay {
         let stored = UserDefaults.standard.double(forKey: PrefKey.hudDuration)
         var delay: Duration = stored > 0 ? .seconds(stored) : autoHideDelay
         // Never fade out before a pending settle commit fires — the app would
-        // activate "out of nowhere" after the HUD is gone. Manual-mode
-        // trackpad browsing has no pending commit, but a mouse step (always
-        // timed) still needs the clamp.
+        // activate "out of nowhere" after the HUD is gone.
         let focus = FocusDelayPref.seconds()
-        if focus > 0, ActivationMode.current() == .timed || (hasPendingCommit?() ?? false) {
+        if focus > 0 {
             delay = max(delay, .seconds(focus + 0.3))
         }
         HUDAutoHide.shared.requestAutoHide(after: delay)
@@ -222,6 +220,7 @@ private struct SwitcherHUDView: View {
     let onHover: (Bool) -> Void
     let onSettings: () -> Void
     let onSelect: (pid_t) -> Void
+    let onClose: (pid_t) -> Void
 
     @State private var gearHovering = false
 
@@ -269,7 +268,8 @@ private struct SwitcherHUDView: View {
                         scale: 0.66 + 0.64 * emphasis,
                         shadowOpacity: 0.4 * depth,
                         iconOpacity: 0.68 + 0.32 * depth,
-                        onTap: { onSelect(slot.entry.id) }
+                        onTap: { onSelect(slot.entry.id) },
+                        onClose: { onClose(slot.entry.id) }
                     )
                     .position(
                         x: centerX + sin(theta) * radius,
@@ -280,6 +280,7 @@ private struct SwitcherHUDView: View {
             }
             .frame(width: width, height: height)
             .animation(.snappy(duration: 0.28), value: entries[selectedIndex].id)
+            .animation(.snappy(duration: 0.28), value: entries.map(\.id))
 
             Text(entries[selectedIndex].name)
                 .font(.system(size: 12, weight: .medium))
@@ -321,7 +322,8 @@ private struct SwitcherHUDView: View {
 }
 
 /// One app icon on the ring; brightens, pops, and shows the pointing-hand
-/// cursor on hover so it reads as clickable.
+/// cursor on hover so it reads as clickable. Left-click switches to the app,
+/// right-click quits it.
 private struct CarouselIcon: View {
     let icon: NSImage
     let showGlow: Bool
@@ -330,6 +332,7 @@ private struct CarouselIcon: View {
     let shadowOpacity: Double
     let iconOpacity: Double
     let onTap: () -> Void
+    let onClose: () -> Void
 
     @State private var hovering = false
 
@@ -350,6 +353,7 @@ private struct CarouselIcon: View {
             .opacity(hovering ? 1 : iconOpacity)
             .animation(.easeOut(duration: 0.12), value: hovering)
             .contentShape(Rectangle())
+            .overlay { RightClickCatcher(onRightClick: onClose) }
             .onHover { isHovering in
                 hovering = isHovering
                 if isHovering {
@@ -359,5 +363,40 @@ private struct CarouselIcon: View {
                 }
             }
             .onTapGesture(perform: onTap)
+    }
+}
+
+/// Claims only right-button events; everything else falls through (hitTest
+/// returns nil) so the tap gesture and hover tracking above are untouched.
+/// rightMouseDown without calling super suppresses the context-menu path —
+/// the close is direct, no menu.
+private struct RightClickCatcher: NSViewRepresentable {
+    let onRightClick: () -> Void
+
+    func makeNSView(context: Context) -> CatcherView {
+        let view = CatcherView()
+        view.onRightClick = onRightClick
+        return view
+    }
+
+    func updateNSView(_ view: CatcherView, context: Context) {
+        view.onRightClick = onRightClick
+    }
+
+    final class CatcherView: NSView {
+        var onRightClick: (() -> Void)?
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let type = NSApp.currentEvent?.type,
+                  type == .rightMouseDown || type == .rightMouseUp || type == .rightMouseDragged
+            else { return nil }
+            return super.hitTest(point)
+        }
+
+        override func rightMouseDown(with event: NSEvent) {
+            onRightClick?()
+        }
+
+        override func rightMouseUp(with event: NSEvent) {}
     }
 }

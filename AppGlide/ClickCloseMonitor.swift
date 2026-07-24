@@ -1,5 +1,5 @@
 //
-//  ClickCommitMonitor.swift
+//  ClickCloseMonitor.swift
 //  AppGlide
 //
 
@@ -9,7 +9,7 @@ import CoreGraphics
 /// C-convention callback — can't carry actor isolation. The tap's runloop
 /// source lives on the main runloop, so assumeIsolated is a same-thread
 /// assertion, not a hop.
-private nonisolated func clickCommitTapCallback(
+private nonisolated func clickCloseTapCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
     event: CGEvent,
@@ -17,55 +17,31 @@ private nonisolated func clickCommitTapCallback(
 ) -> Unmanaged<CGEvent>? {
     guard let userInfo else { return Unmanaged.passUnretained(event) }
     return MainActor.assumeIsolated {
-        Unmanaged<ClickCommitMonitor>.fromOpaque(userInfo).takeUnretainedValue()
+        Unmanaged<ClickCloseMonitor>.fromOpaque(userInfo).takeUnretainedValue()
             .handle(type: type, event: event)
     }
 }
 
-/// Manual activation mode: a physical trackpad click while 3 fingers rest on
-/// the pad commits the carousel selection. The click (down, up, and any drag
+/// A physical trackpad click while 3 fingers rest on the pad quits the app
+/// currently selected in the carousel. The click (down, up, and any drag
 /// between) is consumed so it never lands on whatever is under the pointer.
-/// The tap exists only while the mode is manualClick, so timed mode pays no
-/// per-click tap cost.
-final class ClickCommitMonitor {
+/// Outside a browsing session the callback is one cheap check per click.
+final class ClickCloseMonitor {
     private let switcher: AppSwitcher
     private let gestureMonitor: GestureMonitor
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     /// A down was swallowed; swallow the matching up (and drags) too.
     private var swallowUntilUp = false
-    private var modeObserver: NSObjectProtocol?
 
     init(switcher: AppSwitcher, gestureMonitor: GestureMonitor) {
         self.switcher = switcher
         self.gestureMonitor = gestureMonitor
-        modeObserver = NotificationCenter.default.addObserver(
-            forName: .appGlideActivationModeChanged, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.syncToMode()
-            }
-        }
     }
 
-    deinit {
-        if let modeObserver {
-            NotificationCenter.default.removeObserver(modeObserver)
-        }
-    }
-
-    /// Idempotent: installs or removes the tap to match the pref. Called at
-    /// launch, on mode changes, and on app activation so the tap recovers
-    /// once Accessibility is granted.
-    func syncToMode() {
-        if ActivationMode.current() == .manualClick {
-            start()
-        } else {
-            stop()
-        }
-    }
-
-    private func start() {
+    /// Idempotent: called at launch and on app activation so the tap
+    /// recovers once Accessibility is granted.
+    func start() {
         guard tap == nil else { return }
         let mask = CGEventMask(1) << CGEventType.leftMouseDown.rawValue
             | CGEventMask(1) << CGEventType.leftMouseUp.rawValue
@@ -75,12 +51,12 @@ final class ClickCommitMonitor {
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: mask,
-            callback: clickCommitTapCallback,
+            callback: clickCloseTapCallback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
             // Active taps need Accessibility; the Settings Status row is the
             // recovery path.
-            AppLog.log("click commit tap creation failed (Accessibility missing?)")
+            AppLog.log("click close tap creation failed (Accessibility missing?)")
             return
         }
         tap = port
@@ -122,18 +98,17 @@ final class ClickCommitMonitor {
         }
         guard type == .leftMouseDown else { return Unmanaged.passUnretained(event) }
         // >= rather than ==: with the browsing gate already required, a stray
-        // 4th contact during the press should still commit — passing the
-        // click through to the app underneath is the worse failure.
+        // 4th contact during the press should still quit — passing the click
+        // through to the app underneath is the worse failure.
         let defaults = UserDefaults.standard
-        guard ActivationMode.current(defaults) == .manualClick,
-              !defaults.bool(forKey: PrefKey.isPaused),
+        guard !defaults.bool(forKey: PrefKey.isPaused),
               gestureMonitor.trackpadFingersDown >= SwipeGestureRecognizer.Constants.requiredFingers,
               switcher.isBrowsing,
               !MissionControlDetector.isActive() else {
             return Unmanaged.passUnretained(event)
         }
         swallowUntilUp = true
-        switcher.commitNow()
+        switcher.closeSelected()
         return nil  // consume: the click must not land under the pointer
     }
 }

@@ -35,7 +35,6 @@ struct SettingsView: View {
     @AppStorage(PrefKey.swipeDistance) private var swipeDistance = 0.08
     @AppStorage(PrefKey.glideStepDistance) private var glideStepDistance = 0.10
     @AppStorage(PrefKey.focusDelay) private var focusDelay = FocusDelayPref.defaultSeconds
-    @AppStorage(PrefKey.activationMode) private var activationMode = ActivationMode.timed.rawValue
     @AppStorage(PrefKey.hudDuration) private var hudDuration = 2.0
     @AppStorage(PrefKey.hapticsEnabled) private var hapticsEnabled = true
     @AppStorage(PrefKey.musicHUDEnabled) private var musicHUDEnabled = true
@@ -87,29 +86,18 @@ struct SettingsView: View {
                     value: $glideStepDistance,
                     range: 0.06...0.16
                 )
-                Picker("Switch apps", selection: $activationMode) {
-                    Text("After pausing on an app").tag(ActivationMode.timed.rawValue)
-                    Text("Only when I click with 3 fingers").tag(ActivationMode.manualClick.rawValue)
-                }
-                .pickerStyle(.radioGroup)
-                .onChange(of: activationMode) { _, _ in
-                    NotificationCenter.default.post(name: .appGlideActivationModeChanged, object: nil)
-                }
-                if activationMode == ActivationMode.timed.rawValue {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(focusDelay < 0.05
-                            ? "Switch apps immediately"
-                            : "Switch after resting on an app for \(focusDelay, format: .number.precision(.fractionLength(2))) s")
-                        Slider(value: $focusDelay, in: 0...2.0, step: 0.05)
-                        Text("Apps you browse past won't be raised or un-minimized until the selection holds still this long. 0 = instant.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("Press the trackpad down with 3 fingers to switch — a physical click, not a tap (macOS reserves 3-finger tap for Look Up). Magic Mouse scrolling still switches after a short pause. Requires the Accessibility permission.")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(focusDelay < 0.05
+                        ? "Switch apps immediately"
+                        : "Switch after resting on an app for \(focusDelay, format: .number.precision(.fractionLength(2))) s")
+                    Slider(value: $focusDelay, in: 0...2.0, step: 0.05)
+                    Text("Apps you browse past won't be raised or un-minimized until the selection holds still this long. 0 = instant.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Text("While the switcher is up: click with 3 fingers to quit the selected app, or right-click any icon to quit it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Minimized Apps") {
                 Picker("When all of an app's windows are minimized", selection: $minimizedBehavior) {

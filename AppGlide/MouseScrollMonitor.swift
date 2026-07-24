@@ -213,14 +213,14 @@ final class MouseScrollMonitor {
             accRing += accRing > 0 ? -stepDistance : stepDistance
             accMusic = 0
             setModifierPin()
-            gestureMonitor.dispatch(direction, source: .mouse)
+            gestureMonitor.dispatch(direction)
         } else if !musicLatched,
                   accMusic >= Constants.musicThreshold,
                   abs(accMusic) > Constants.dominanceRatio * abs(accRing) {
             musicLatched = true
             accRing = 0
             setModifierPin()
-            gestureMonitor.dispatch(.down, source: .mouse)
+            gestureMonitor.dispatch(.down)
         }
 
         return nil  // consume: the page behind must not scroll

@@ -37,6 +37,9 @@ final class AppSwitcher: NSObject {
     /// notification doesn't kill the live session; any other activation
     /// (Dock, Cmd-Tab, click) must end it.
     private var pendingActivationPID: pid_t?
+    /// Set when we quit the frontmost app: macOS then activates some other
+    /// app on its own, and that activation must not end the browsing session.
+    private var suppressActivationEndUntil: ContinuousClock.Instant?
     private var lastSwipeAt: ContinuousClock.Instant?
     private var commitTask: Task<Void, Never>?
     private let clock = ContinuousClock()
@@ -44,7 +47,7 @@ final class AppSwitcher: NSObject {
     override init() {
         super.init()
         overlay.onSelectApp = { [weak self] pid in self?.jumpToApp(pid) }
-        overlay.hasPendingCommit = { [weak self] in self?.commitTask != nil }
+        overlay.onCloseApp = { [weak self] pid in self?.closeApp(pid) }
         seedMRU()
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(
@@ -93,14 +96,12 @@ final class AppSwitcher: NSObject {
 
     /// step: +1 = older in MRU, -1 = newer. Wraps around at the ends.
     ///
-    /// Timed mode: swipes only move the cursor and HUD; the selection
-    /// activates once it has rested for the focus-delay pref, so browsing
-    /// raises one app instead of every app passed along the way. At 0 the
-    /// legacy behavior applies: an isolated swipe commits instantly and only
-    /// rapid glides defer. Manual mode: trackpad browsing never
-    /// auto-activates — ClickCommitMonitor calls commitNow() on a 3-finger
-    /// click — while mouse steps keep the timed path.
-    func handleSwipe(step: Int, source: SwipeSource) {
+    /// Swipes only move the cursor and HUD; the selection activates once it
+    /// has rested for the focus-delay pref, so browsing raises one app
+    /// instead of every app passed along the way. At 0 the legacy behavior
+    /// applies: an isolated swipe commits instantly and only rapid glides
+    /// defer.
+    func handleSwipe(step: Int) {
         pendingActivationPID = nil
         if session == nil {
             session = makeSession()
@@ -128,19 +129,15 @@ final class AppSwitcher: NSObject {
         lastSwipeAt = now
         commitTask?.cancel()
         commitTask = nil
-        // Manual mode (trackpad): browsing never auto-activates — the commit
-        // comes from ClickCommitMonitor on a 3-finger click.
-        if source == .mouse || ActivationMode.current() == .timed {
-            let delaySeconds = FocusDelayPref.seconds()
-            if delaySeconds > 0 {
-                scheduleCommit(after: .seconds(delaySeconds))
-            } else if isRapidGlide {
-                // Instant mode still defers mid-glide steps so a fast glide
-                // raises one app, not every app passed along the way.
-                scheduleCommit(after: Constants.settleDelay)
-            } else {
-                commitSelection()
-            }
+        let delaySeconds = FocusDelayPref.seconds()
+        if delaySeconds > 0 {
+            scheduleCommit(after: .seconds(delaySeconds))
+        } else if isRapidGlide {
+            // Instant mode still defers mid-glide steps so a fast glide
+            // raises one app, not every app passed along the way.
+            scheduleCommit(after: Constants.settleDelay)
+        } else {
+            commitSelection()
         }
 
         overlay.show(apps: s.apps, selectedIndex: s.index)
@@ -158,19 +155,47 @@ final class AppSwitcher: NSObject {
     }
 
     /// True while the carousel is live on screen — the window in which a
-    /// manual 3-finger click commits (and gets swallowed).
+    /// 3-finger click quits the selection (and gets swallowed).
     var isBrowsing: Bool { session != nil && overlay.isShowing }
 
-    /// Manual activation: commit the current selection and dismiss the HUD.
-    func commitNow() {
+    /// 3-finger click while browsing: quit the selected app, keep browsing.
+    func closeSelected() {
+        guard let s = session, s.apps.indices.contains(s.index) else { return }
+        closeApp(s.apps[s.index].processIdentifier)
+    }
+
+    /// Quit an app from the ring (3-finger click or a right-clicked icon).
+    /// Optimistic: the icon leaves the ring immediately; if the app survives
+    /// (unsaved-changes sheet), the next session rebuild restores it.
+    func closeApp(_ pid: pid_t) {
+        guard isBrowsing, var s = session,
+              let idx = s.apps.firstIndex(where: { $0.processIdentifier == pid }) else { return }
+        let app = s.apps[idx]
+        guard app.bundleIdentifier != "com.apple.finder" else { return }
         commitTask?.cancel()
         commitTask = nil
-        guard session != nil else { return }
-        if UserDefaults.standard.object(forKey: PrefKey.hapticsEnabled) as? Bool ?? true {
-            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid {
+            // macOS auto-activates another app when the frontmost one exits;
+            // that activation must not end the browsing session.
+            suppressActivationEndUntil = clock.now + .seconds(2)
         }
-        commitSelection()
-        overlay.hide()
+        if !app.terminate() {
+            AppLog.log("terminate() refused for \(app.bundleIdentifier ?? "?")")
+        }
+        s.apps.remove(at: idx)
+        if s.apps.count <= 1 {
+            // The ring layout and makeSession both need at least 2 apps.
+            session = nil
+            overlay.hide()
+            return
+        }
+        if idx < s.index { s.index -= 1 }
+        s.index = min(s.index, s.apps.count - 1)  // index -1 (no eligible frontmost) survives
+        session = s
+        overlay.show(apps: s.apps, selectedIndex: s.index)
+        if UserDefaults.standard.object(forKey: PrefKey.hapticsEnabled) as? Bool ?? true {
+            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+        }
     }
 
     /// HUD icon clicked: instead of rotating the whole ring to the clicked
@@ -217,6 +242,9 @@ final class AppSwitcher: NSObject {
         mruPIDs.insert(pid, at: 0)
         if pid == pendingActivationPID {
             pendingActivationPID = nil
+        } else if let until = suppressActivationEndUntil, clock.now < until {
+            // Side effect of quitting the frontmost app, not a user switch.
+            suppressActivationEndUntil = nil
         } else {
             // User switched apps some other way (Dock, Cmd-Tab, click); a
             // pending glide commit must not override their choice.
@@ -229,7 +257,13 @@ final class AppSwitcher: NSObject {
 
     @objc private func workspaceDidTerminateApp(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-        mruPIDs.removeAll { $0 == app.processIdentifier }
+        let pid = app.processIdentifier
+        mruPIDs.removeAll { $0 == pid }
+        if let s = session, !s.apps.contains(where: { $0.processIdentifier == pid }) {
+            // The strip already reflects the quit (we initiated it via
+            // closeApp); keep browsing.
+            return
+        }
         // The strip contains a dead app now; rebuild it on the next swipe.
         session = nil
         commitTask?.cancel()

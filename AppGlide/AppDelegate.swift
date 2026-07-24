@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var musicOverlay: MusicOverlay?
     private var mouseScrollMonitor: MouseScrollMonitor?
     private var mouseTouchMonitor: MouseTouchMonitor?
-    private var clickCommitMonitor: ClickCommitMonitor?
+    private var clickCloseMonitor: ClickCloseMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let defaults = UserDefaults.standard
@@ -47,20 +47,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mouseTouchMonitor = touch
         touch.start()
 
-        let clickCommit = ClickCommitMonitor(switcher: switcher, gestureMonitor: monitor)
-        clickCommitMonitor = clickCommit
-        clickCommit.syncToMode()
+        let clickClose = ClickCloseMonitor(switcher: switcher, gestureMonitor: monitor)
+        clickCloseMonitor = clickClose
+        clickClose.start()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         // Idempotent retries: recover the taps if Accessibility was granted
         // after launch.
         mouseScrollMonitor?.start()
-        clickCommitMonitor?.syncToMode()
+        clickCloseMonitor?.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        clickCommitMonitor?.stop()
+        clickCloseMonitor?.stop()
         mouseTouchMonitor?.stop()
         mouseScrollMonitor?.stop()
         gestureMonitor?.stop()
