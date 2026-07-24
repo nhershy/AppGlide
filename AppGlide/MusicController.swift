@@ -17,6 +17,10 @@ struct NowPlaying: Equatable {
     var favorited: Bool
     var shuffle: Bool
     var persistentID: String
+    /// True while the station started from the HUD is still driving playback.
+    /// Maintained by the controller's station latch — Music's scripting
+    /// interface cannot report this itself (see the latch comment).
+    var isStation: Bool
 }
 
 enum MusicState: Equatable {
@@ -60,6 +64,92 @@ final class MusicController {
     /// setVolume coalescing state — only touched on the main actor.
     private var volumeSendActive = false
     private var pendingVolume: Int?
+
+    // MARK: - Station latch
+    //
+    // AppleScript cannot tell station playback from an on-demand catalog
+    // song: both report a `URL track` with identical properties, no current
+    // playlist, and no stream title (verified against Music on macOS 26 —
+    // playerInfo notifications and the Controls menu are equally blind). So
+    // "a station is playing" is tracked as a latch instead: set when the HUD
+    // starts a station, cleared when evidence shows the user took over —
+    // a non-stream track, a stop, or a jump to a different track mid-song.
+    // Natural station advances only happen at end-of-track, which is what
+    // the position baseline distinguishes.
+
+    /// All latch state — only touched on the main actor, like the volume
+    /// coalescing above.
+    private var stationLatched = false
+    /// Deadline for a just-requested station to actually start: any playback
+    /// discontinuity inside the window confirms it; none by the deadline
+    /// means the deep link fizzled and the latch clears.
+    private var stationStartDeadline: Date?
+    /// HUD-initiated next/previous must not read as takeovers.
+    private var expectedSkipUntil: Date?
+    /// Last observed playback sample — the baseline discontinuities are
+    /// judged against.
+    private var lastSample: (trackID: String, position: Double, duration: Double, at: Date)?
+
+    var isStationLatched: Bool { stationLatched }
+
+    /// Called when the HUD successfully opens a station deep link.
+    private func noteStationRequested() {
+        stationLatched = true
+        stationStartDeadline = Date().addingTimeInterval(15)
+    }
+
+    private func noteExpectedSkip() {
+        guard stationLatched else { return }
+        expectedSkipUntil = Date().addingTimeInterval(5)
+    }
+
+    private func clearStationLatch(_ reason: String) {
+        guard stationLatched else { return }
+        stationLatched = false
+        stationStartDeadline = nil
+        expectedSkipUntil = nil
+        AppLog.log("station latch: cleared (\(reason))")
+    }
+
+    /// Runs once per refresh with the freshly polled playback sample.
+    private func updateStationLatch(
+        trackID: String, position: Double, duration: Double, streamed: Bool
+    ) {
+        let sampledAt = Date()
+        defer { lastSample = (trackID, position, duration, sampledAt) }
+        guard stationLatched, let last = lastSample else { return }
+        let changedTrack = trackID != last.trackID
+
+        if let deadline = stationStartDeadline {
+            // Waiting for the created station to start. The station's first
+            // track can be the seed song itself, so a rewind counts as a
+            // discontinuity too.
+            if changedTrack || position < last.position - 5 {
+                stationStartDeadline = nil
+            } else if sampledAt > deadline {
+                clearStationLatch("station never started")
+            }
+            return
+        }
+
+        if !streamed {
+            clearStationLatch("non-stream playback")
+            return
+        }
+        guard changedTrack else { return }
+        if let skip = expectedSkipUntil, sampledAt <= skip {
+            expectedSkipUntil = nil
+            return
+        }
+        // Natural end-of-track advance: the previous sample was within reach
+        // of the track's end given how long ago it was taken. The margin
+        // adapts to the poll cadence (1s visible, slower when hidden).
+        let margin = sampledAt.timeIntervalSince(last.at) + 2.0
+        if last.duration > 0, last.position >= last.duration - margin {
+            return
+        }
+        clearStationLatch("manual playback change")
+    }
 
     nonisolated static var isMusicRunning: Bool {
         !NSRunningApplication.runningApplications(withBundleIdentifier: musicBundleID).isEmpty
@@ -105,42 +195,78 @@ final class MusicController {
     /// script branches so it's known even when nothing is playing; nil on the
     /// error paths so callers can keep the last known value.
     func refresh() async -> (state: MusicState, volume: Int?) {
-        guard Self.isMusicRunning else { return (.notRunning, nil) }
-        // Deliberately NO try/on error in the script: a TCC denial raises a
-        // catchable AppleScript error, and swallowing it would masquerade as
-        // "nothing playing". Errors must surface here.
+        guard Self.isMusicRunning else {
+            clearStationLatch("Music not running")
+            return (.notRunning, nil)
+        }
+        // Deliberately NO try/on error around the script as a whole: a TCC
+        // denial raises a catchable AppleScript error, and swallowing it would
+        // masquerade as "nothing playing". Errors must surface here. The two
+        // narrow trys below sit after `current track` has already executed, so
+        // a TCC denial still errors out of the script before reaching them —
+        // they only shield the stream probe, which must degrade to "not
+        // streamed" rather than sink the whole refresh.
+        //
+        // `streamed` (URL track class, or a live-radio stream title) can NOT
+        // positively identify a station — on-demand catalog songs are also
+        // URL tracks. It's a negative signal only: a non-stream track proves
+        // the user left the station, feeding the latch (see MARK above).
         let source = """
         tell application "Music"
             if player state is stopped then return {"stopped", sound volume}
             set t to current track
+            set streamed to false
+            try
+                if class of t is URL track then set streamed to true
+            end try
+            if not streamed then
+                try
+                    set streamTitle to current stream title
+                    if streamTitle is not missing value and streamTitle is not "" then set streamed to true
+                end try
+            end if
             return {"ok", name of t, artist of t, album of t, ¬
                 (player state is playing), player position, duration of t, ¬
-                favorited of t, shuffle enabled, persistent ID of t, sound volume}
+                favorited of t, shuffle enabled, persistent ID of t, sound volume, streamed}
         end tell
         """
         switch await Self.executeAsync(source) {
         case .failure(let error):
-            if error.code == Self.errAEEventNotPermitted { return (.permissionDenied, nil) }
+            if error.code == Self.errAEEventNotPermitted {
+                clearStationLatch("automation permission denied")
+                return (.permissionDenied, nil)
+            }
             AppLog.log("Music refresh failed (\(error.code)) \(error.message)")
             return (.nothingPlaying, nil)
         case .success(let descriptor):
             guard descriptor.atIndex(1)?.stringValue == "ok",
-                  descriptor.numberOfItems >= 11 else {
+                  descriptor.numberOfItems >= 12 else {
+                clearStationLatch("playback stopped")
                 let volume: Int? = descriptor.atIndex(1)?.stringValue == "stopped"
                     ? descriptor.atIndex(2).map { Int($0.int32Value) }
                     : nil
                 return (.nothingPlaying, volume)
             }
+            let trackID = descriptor.atIndex(10)?.stringValue ?? ""
+            let position = descriptor.atIndex(6)?.doubleValue ?? 0
+            let duration = descriptor.atIndex(7)?.doubleValue ?? 0
+            updateStationLatch(
+                trackID: trackID,
+                position: position,
+                duration: duration,
+                streamed: descriptor.atIndex(12)?.booleanValue ?? false
+            )
             let now = NowPlaying(
                 title: descriptor.atIndex(2)?.stringValue ?? "",
                 artist: descriptor.atIndex(3)?.stringValue ?? "",
                 album: descriptor.atIndex(4)?.stringValue ?? "",
                 isPlaying: descriptor.atIndex(5)?.booleanValue ?? false,
-                position: descriptor.atIndex(6)?.doubleValue ?? 0,
-                duration: descriptor.atIndex(7)?.doubleValue ?? 0,
+                position: position,
+                duration: duration,
                 favorited: descriptor.atIndex(8)?.booleanValue ?? false,
                 shuffle: descriptor.atIndex(9)?.booleanValue ?? false,
-                persistentID: descriptor.atIndex(10)?.stringValue ?? ""
+                persistentID: trackID,
+                isStation: stationLatched
             )
             return (.playing(now), descriptor.atIndex(11).map { Int($0.int32Value) })
         }
@@ -171,10 +297,16 @@ final class MusicController {
     }
 
     func playPause() async { await run("tell application \"Music\" to playpause") }
-    func next() async { await run("tell application \"Music\" to next track") }
+    func next() async {
+        noteExpectedSkip()
+        await run("tell application \"Music\" to next track")
+    }
     /// Media-key behavior: restart the track, or go to the previous one when
     /// already near the start.
-    func previous() async { await run("tell application \"Music\" to back track") }
+    func previous() async {
+        noteExpectedSkip()
+        await run("tell application \"Music\" to back track")
+    }
 
     /// Explicit target rather than a toggle: catalog tracks can report
     /// favorited as false even after a successful favorite, so toggling off
@@ -401,6 +533,7 @@ final class MusicController {
             return false
         }
         AppLog.log("create station: ra.\(trackID) for \(now.artist) — \(now.title)")
+        noteStationRequested()
         return true
     }
 }

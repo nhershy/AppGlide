@@ -53,6 +53,10 @@ final class MusicOverlay {
     private var panel: NSPanel?
     private var hostingView: FirstMouseHostingView<MusicHUDView>?
     private var pollTask: Task<Void, Never>?
+    /// Slow poll that keeps the controller's station latch honest while the
+    /// HUD is hidden — without it, a takeover in Music.app between HUD
+    /// showings would go unnoticed and the button would reopen green.
+    private var stationMonitorTask: Task<Void, Never>?
     private let playlistMenuTarget = PlaylistMenuTarget()
 
     init(controller: MusicController) {
@@ -146,6 +150,8 @@ final class MusicOverlay {
         if !controller.ensureAutomationPermission() {
             model.state = .permissionDenied
         }
+        stationMonitorTask?.cancel()
+        stationMonitorTask = nil
         startPolling()
         if !HUDHoverState.shared.anyHovering {
             scheduleAutoHide()
@@ -155,6 +161,7 @@ final class MusicOverlay {
     func hide() {
         pollTask?.cancel()
         pollTask = nil
+        startStationMonitorIfNeeded()
         model.volumeExpanded = false
         HUDHoverState.shared.setHovering(false, for: "music")
         // Post at hide start so the carousel descends alongside the fade.
@@ -194,6 +201,28 @@ final class MusicOverlay {
                     self.model.artwork = nil
                 }
                 try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    /// While a HUD-created station plays, keep refreshing at a relaxed
+    /// cadence even though the HUD is hidden: the latch needs to see track
+    /// transitions to tell natural station advances from the user taking
+    /// over in Music.app. Exits as soon as the latch clears.
+    private func startStationMonitorIfNeeded() {
+        stationMonitorTask?.cancel()
+        guard controller.isStationLatched else {
+            stationMonitorTask = nil
+            return
+        }
+        stationMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                guard let self, !Task.isCancelled else { return }
+                guard self.controller.isStationLatched else { return }
+                let (state, volume) = await self.controller.refresh()
+                self.model.state = state
+                if let volume { self.model.volume = volume }
             }
         }
     }
@@ -298,6 +327,11 @@ private struct MusicHUDView: View {
     /// current track) or the track changes.
     @State private var shuffleOverride: Bool?
     @State private var favoritedOverride: Bool?
+    /// Optimistic Create Station: green immediately on click, bridging the
+    /// few seconds until Music opens the deep link and the poll's isStation
+    /// confirms. Unlike shuffle, confirmation may never arrive (createStation
+    /// only proves the URL opened), so a failsafe timeout also clears it.
+    @State private var stationOverride: Bool?
     /// Last polled persistent ID, to reset per-song state on track change.
     @State private var trackID: String?
     /// Per-song "added" confirmations: green until the track changes.
@@ -355,6 +389,7 @@ private struct MusicHUDView: View {
             guard case .playing(let now) = newState else {
                 favoritedOverride = nil
                 shuffleOverride = nil
+                stationOverride = nil
                 libraryAdded = false
                 playlistAdded = false
                 return
@@ -365,10 +400,13 @@ private struct MusicHUDView: View {
                 libraryAdded = false
                 playlistAdded = false
             }
-            // Shuffle is player-global, not per-track: cleared only once the
-            // poll confirms, which it does reliably.
+            // Shuffle and station are player-global, not per-track: cleared
+            // only once the poll confirms — never on track change, since a
+            // just-created station's first track IS a track change and the
+            // override exists exactly to cover that window.
             if let f = favoritedOverride, now.favorited == f { favoritedOverride = nil }
             if let s = shuffleOverride, now.shuffle == s { shuffleOverride = nil }
+            if stationOverride == true, now.isStation { stationOverride = nil }
         }
     }
 
@@ -568,6 +606,7 @@ private struct MusicHUDView: View {
     private func controls(now: NowPlaying?) -> some View {
         let shuffleOn = shuffleOverride ?? (now?.shuffle == true)
         let favorited = favoritedOverride ?? (now?.favorited == true)
+        let stationActive = stationOverride ?? (now?.isStation == true)
         return HStack(spacing: 16) {
             controlButton("backward.fill") { await controller.previous() }
                 .help("Previous")
@@ -633,8 +672,15 @@ private struct MusicHUDView: View {
                                 }
                             }
                             .help("Add to Library")
-                            controlButton("dot.radiowaves.left.and.right", size: 15) { await createStation(now) }
-                                .help("Create Station")
+                            // Stays clickable while green: re-seeding a
+                            // station from the station's current track is
+                            // a valid move.
+                            controlButton(
+                                "dot.radiowaves.left.and.right",
+                                size: 15,
+                                tint: stationActive ? .green : nil
+                            ) { await createStation(now) }
+                                .help(stationActive ? "Station playing — create a new one" : "Create Station")
                             controlButton(
                                 playlistAdded ? "text.badge.checkmark" : "text.badge.plus",
                                 size: 15,
@@ -654,12 +700,18 @@ private struct MusicHUDView: View {
                                 }
                             }
                             .help("Add to Playlist")
-                            controlButton("shuffle", tint: shuffleOn ? .accentColor : nil) {
+                            // Stations sequence themselves; Music ignores
+                            // shuffle for them, so don't pretend otherwise.
+                            controlButton(
+                                "shuffle",
+                                tint: shuffleOn ? .accentColor : nil,
+                                enabled: !stationActive
+                            ) {
                                 let target = !shuffleOn
                                 shuffleOverride = target
                                 await controller.setShuffle(target)
                             }
-                            .help("Shuffle")
+                            .help(stationActive ? "Shuffle unavailable for stations" : "Shuffle")
                         }
                         .transition(.opacity)
                     }
@@ -674,9 +726,10 @@ private struct MusicHUDView: View {
         size: CGFloat = 16,
         hitSize: CGFloat = 26,
         tint: Color? = nil,
+        enabled: Bool = true,
         action: @escaping () async -> Void
     ) -> some View {
-        ControlButton(symbol: symbol, size: size, hitSize: hitSize, tint: tint) {
+        ControlButton(symbol: symbol, size: size, hitSize: hitSize, tint: tint, enabled: enabled) {
             onInteract()
             Task { await action() }
         }
@@ -772,6 +825,16 @@ private struct MusicHUDView: View {
             icon: "dot.radiowaves.left.and.right",
             success: created
         )
+        if created {
+            stationOverride = true
+            // Failsafe: `created` only proves the URL opened, so the poll may
+            // never confirm. Once it has, the polled value drives the tint
+            // anyway, making the unconditional clear harmless.
+            Task {
+                try? await Task.sleep(for: .seconds(10))
+                stationOverride = nil
+            }
+        }
     }
 
     /// Presents the capsule toast, replacing any toast already showing —
@@ -877,6 +940,8 @@ private struct ControlButton: View {
     let size: CGFloat
     let hitSize: CGFloat
     let tint: Color?
+    // `var` with a default so the memberwise init keeps existing call sites.
+    var enabled: Bool = true
     let action: () -> Void
 
     @State private var hovering = false
@@ -885,15 +950,25 @@ private struct ControlButton: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: size))
-                .foregroundStyle(tint ?? Color.white.opacity(hovering ? 1 : 0.85))
+                // Disabled suppresses the tint too: a player-global flag like
+                // "shuffle enabled" can stay true while the button is inert,
+                // and accent-plus-dimmed would read as contradictory.
+                .foregroundStyle(enabled
+                    ? (tint ?? Color.white.opacity(hovering ? 1 : 0.85))
+                    : Color.white.opacity(0.3))
                 .frame(width: hitSize, height: hitSize)
-                .background(Circle().fill(.white.opacity(hovering ? 0.15 : 0)))
+                .background(Circle().fill(.white.opacity(enabled && hovering ? 0.15 : 0)))
                 .contentShape(Rectangle())
-                .scaleEffect(hovering ? 1.08 : 1)
+                .scaleEffect(enabled && hovering ? 1.08 : 1)
                 .animation(.easeOut(duration: 0.12), value: hovering)
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
         .onHover { isHovering in
+            guard enabled else {
+                hovering = false
+                return
+            }
             hovering = isHovering
             if isHovering {
                 NSCursor.pointingHand.push()
