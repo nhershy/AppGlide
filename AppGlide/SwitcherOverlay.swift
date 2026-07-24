@@ -21,7 +21,7 @@ final class SwitcherOverlay {
     var isShowing: Bool { (panel?.isVisible ?? false) && (panel?.alphaValue ?? 0) > 0 }
 
     private var panel: NSPanel?
-    private var hostingView: NSHostingView<SwitcherHUDView>?
+    private var hostingView: NSHostingView<AnyView>?
     private let autoHideDelay: Duration
     /// Extra bottom clearance while the music HUD occupies the bottom slot.
     private var bottomInset: CGFloat = 0
@@ -172,10 +172,10 @@ final class SwitcherOverlay {
 
     private func ensurePanel(rootView: SwitcherHUDView) -> NSPanel {
         if let panel, let hostingView {
-            hostingView.rootView = rootView
+            hostingView.rootView = AnyView(rootView)
             return panel
         }
-        let hosting = FirstMouseHostingView(rootView: rootView)
+        let hosting = FirstMouseHostingView(rootView: AnyView(rootView))
         let panel = NSPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],

@@ -80,7 +80,7 @@ final class MusicOverlay {
     private let controller: MusicController
     private let model = MusicHUDModel()
     private var panel: NSPanel?
-    private var hostingView: FirstMouseHostingView<MusicHUDView>?
+    private var hostingView: FirstMouseHostingView?
     private var pollTask: Task<Void, Never>?
     /// Slow poll that keeps the controller's station latch honest while the
     /// HUD is hidden — without it, a takeover in Music.app between HUD
@@ -314,7 +314,7 @@ final class MusicOverlay {
             onInteract: { [weak self] in self?.userDidInteract() },
             onPlaylistMenu: { [weak self] onSelect in self?.showPlaylistMenu(onSelect: onSelect) }
         )
-        let hosting = FirstMouseHostingView(rootView: root)
+        let hosting = FirstMouseHostingView(rootView: AnyView(root))
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.hudWidth, height: Self.hudHeight),
             styleMask: [.borderless, .nonactivatingPanel],

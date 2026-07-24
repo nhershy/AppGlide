@@ -8,7 +8,9 @@ import SwiftUI
 
 /// Accepts the first click even though a HUD panel never becomes key, so
 /// buttons inside respond to a single tap.
-final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+/// Non-generic over AnyView: a generic subclass of NSHostingView crashes the
+/// Swift 6.3 optimizer (SIL inliner) when targeting macOS < 26.
+final class FirstMouseHostingView: NSHostingView<AnyView> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 

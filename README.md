@@ -10,6 +10,10 @@ It's made for Mac users who live on a single desktop with overlapping windows �
 
 ![The app-switcher ring with Safari selected, above the Apple Music HUD](pics/switcher-and-music-hud.png)
 
+## Download
+
+Grab the DMG from the [latest release](https://github.com/nhershy/AppGlide/releases/latest), open it, and drag AppGlide to Applications. Requires **macOS 15 (Sequoia) or later**. The app is Developer ID–signed and notarized by Apple, so it opens like any other downloaded app — then follow [Setup](#setup-one-time) below to free up the 3-finger gesture and grant permissions.
+
 ## Gestures
 
 | Gesture | What it does |
@@ -53,7 +57,7 @@ The menu-bar icon's menu mirrors the everyday toggles — pause, invert directio
 
 ## Build & install
 
-Requires Xcode 26+, macOS 26.5+. App Sandbox is off (required by the private multitouch framework), so this is not App Store distributable; it builds and runs locally with a development signature.
+Building requires Xcode 26+; the app runs on macOS 15+. App Sandbox is off (required by the private multitouch framework), so this is not App Store distributable; it builds and runs locally with a development signature.
 
 ```bash
 # Debug
@@ -65,6 +69,8 @@ xcodebuild -project AppGlide.xcodeproj -scheme AppGlide -configuration Release -
 ditto build/Build/Products/Release/AppGlide.app /Applications/AppGlide.app
 open /Applications/AppGlide.app
 ```
+
+`scripts/release.sh` produces the distributable DMG: it archives, exports with Developer ID signing, notarizes with Apple, staples, and packages (one-time `notarytool store-credentials` setup documented in the script).
 
 ## How it works
 
