@@ -15,7 +15,7 @@ final class AppSwitcher: NSObject {
     private enum Constants {
         /// Fallback when the shared "stays visible" pref is unset — matches
         /// MusicOverlay.autoHideDelay so both HUDs default identically.
-        static let overlayHideDelay: Duration = .seconds(2)
+        static let overlayHideDelay: Duration = .seconds(1.5)
         /// Instant mode (focus delay 0) only: a swipe this soon after the
         /// previous one is part of a glide, so its activation is deferred by
         /// settleDelay instead of committing immediately.

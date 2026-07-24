@@ -28,6 +28,19 @@ final class SettingsWindowController {
     }
 }
 
+/// Allowed values per slider: ascending, odd count, with the app default at the
+/// center index so untouched settings render with the knob centered. Center
+/// elements must match the engine defaults (SwipeGestureRecognizer.Constants,
+/// MouseScrollMonitor.Constants.stepDistance, FocusDelayPref.defaultSeconds,
+/// AppSwitcher.Constants.overlayHideDelay).
+private enum SliderCatalog {
+    static let swipeDistance: [Double] = [0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12]
+    static let glideStep: [Double] = [0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14]
+    static let mouseStep: [Double] = [60, 75, 90, 105, 120, 135, 150, 165, 180]
+    static let focusDelay: [Double] = [0, 0.2, 0.35, 0.5, 0.75, 1.0, 1.5]
+    static let hudDuration: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 6.0]
+}
+
 struct SettingsView: View {
     @AppStorage(PrefKey.isPaused) private var isPaused = false
     @AppStorage(PrefKey.reverseDirection) private var reverseDirection = false
@@ -35,7 +48,7 @@ struct SettingsView: View {
     @AppStorage(PrefKey.swipeDistance) private var swipeDistance = 0.08
     @AppStorage(PrefKey.glideStepDistance) private var glideStepDistance = 0.10
     @AppStorage(PrefKey.focusDelay) private var focusDelay = FocusDelayPref.defaultSeconds
-    @AppStorage(PrefKey.hudDuration) private var hudDuration = 2.0
+    @AppStorage(PrefKey.hudDuration) private var hudDuration = 1.5
     @AppStorage(PrefKey.hapticsEnabled) private var hapticsEnabled = true
     @AppStorage(PrefKey.musicHUDEnabled) private var musicHUDEnabled = true
     @AppStorage(PrefKey.mouseScrollEnabled) private var mouseScrollEnabled = true
@@ -44,6 +57,7 @@ struct SettingsView: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var status = SetupStatus.check()
     @State private var exclusionRows: [ExclusionRow] = []
+    @State private var exclusionsExpanded = false
 
     var body: some View {
         Form {
@@ -56,10 +70,29 @@ struct SettingsView: View {
                     url: SetupStatus.accessibilitySettingsURL
                 )
             }
-            Section("Gesture") {
+            Section("Trackpad") {
                 Toggle("Invert swipe direction", isOn: $reverseDirection)
                 Toggle("Haptic feedback on each step", isOn: $hapticsEnabled)
-                Toggle("Hold modifier + scroll to glide (for Magic Mouse)", isOn: $mouseScrollEnabled)
+                NotchedSlider(
+                    title: "Swipe distance",
+                    subtitle: "Travel needed for the first switch — shorter is more sensitive",
+                    values: SliderCatalog.swipeDistance,
+                    value: $swipeDistance,
+                    format: { "\(Int(($0 * 100).rounded()))% of trackpad" }
+                )
+                NotchedSlider(
+                    title: "Glide step",
+                    subtitle: "Extra travel per app while gliding without lifting",
+                    values: SliderCatalog.glideStep,
+                    value: $glideStepDistance,
+                    format: { "\(Int(($0 * 100).rounded()))% of trackpad" }
+                )
+                Text("While the switcher is up: click with 3 fingers to quit the selected app, or right-click any icon to quit it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Magic Mouse") {
+                Toggle("Hold modifier + scroll to glide", isOn: $mouseScrollEnabled)
                 if mouseScrollEnabled {
                     Picker("Modifier", selection: $mouseScrollModifier) {
                         Text("⌥ Option").tag(MouseScrollModifier.option.rawValue)
@@ -67,52 +100,40 @@ struct SettingsView: View {
                         Text("⌃ Control").tag(MouseScrollModifier.control.rawValue)
                     }
                     .pickerStyle(.segmented)
-                    DistanceSlider(
+                    NotchedSlider(
                         title: "Scroll distance per switch",
                         subtitle: "Scroll travel needed per app — shorter is more sensitive",
+                        values: SliderCatalog.mouseStep,
                         value: $mouseStepDistance,
-                        range: 60...250
+                        format: { "\(Int($0)) pt" }
                     )
                 }
-                DistanceSlider(
-                    title: "Swipe distance",
-                    subtitle: "Travel needed for the first switch — shorter is more sensitive",
-                    value: $swipeDistance,
-                    range: 0.05...0.15
-                )
-                DistanceSlider(
-                    title: "Glide step",
-                    subtitle: "Extra travel per app while gliding without lifting",
-                    value: $glideStepDistance,
-                    range: 0.06...0.16
-                )
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(focusDelay < 0.05
-                        ? "Switch apps immediately"
-                        : "Switch after resting on an app for \(focusDelay, format: .number.precision(.fractionLength(2))) s")
-                    Slider(value: $focusDelay, in: 0...2.0, step: 0.05)
-                    Text("Apps you browse past won't be raised or un-minimized until the selection holds still this long. 0 = instant.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text("While the switcher is up: click with 3 fingers to quit the selected app, or right-click any icon to quit it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            Section("Minimized Apps") {
+            Section("Switching") {
+                NotchedSlider(
+                    title: "Focus delay",
+                    subtitle: "Apps you browse past won't be raised or un-minimized until the selection holds still this long.",
+                    values: SliderCatalog.focusDelay,
+                    value: $focusDelay,
+                    format: { $0 < 0.05 ? "Instant" : String(format: "%.2f s", $0) },
+                    minLabel: "Instant",
+                    maxLabel: "Slow"
+                )
                 Picker("When all of an app's windows are minimized", selection: $minimizedBehavior) {
                     Text("Unminimize on switch").tag(MinimizedAppBehavior.restore.rawValue)
                     Text("Skip in switcher").tag(MinimizedAppBehavior.skip.rawValue)
                 }
                 .pickerStyle(.radioGroup)
             }
-            Section("HUD") {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Stays visible for \(hudDuration, format: .number.precision(.fractionLength(1))) s")
-                    Slider(value: $hudDuration, in: 0.5...6.0)
-                }
-            }
-            Section("Music") {
+            Section("Heads-Up Display") {
+                NotchedSlider(
+                    title: "Visible duration",
+                    values: SliderCatalog.hudDuration,
+                    value: $hudDuration,
+                    format: { "\($0.formatted(.number.precision(.fractionLength(1...2)))) s" },
+                    minLabel: "Brief",
+                    maxLabel: "Long"
+                )
                 Toggle("3-finger swipe down shows Music controls", isOn: $musicHUDEnabled)
             }
             Section("General") {
@@ -131,31 +152,36 @@ struct SettingsView: View {
                     }
             }
             Section("Excluded Apps") {
-                ForEach(exclusionRows) { row in
-                    HStack {
-                        if let icon = row.icon {
-                            Image(nsImage: icon)
-                                .resizable()
-                                .frame(width: 16, height: 16)
-                        } else {
-                            Image(systemName: "app.dashed")
-                                .frame(width: 16, height: 16)
-                                .foregroundStyle(.secondary)
+                DisclosureGroup(isExpanded: $exclusionsExpanded) {
+                    ForEach(exclusionRows) { row in
+                        HStack {
+                            if let icon = row.icon {
+                                Image(nsImage: icon)
+                                    .resizable()
+                                    .frame(width: 16, height: 16)
+                            } else {
+                                Image(systemName: "app.dashed")
+                                    .frame(width: 16, height: 16)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(row.name)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { row.isExcluded },
+                                set: { setExcluded(row.id, $0) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.checkbox)
                         }
-                        Text(row.name)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { row.isExcluded },
-                            set: { setExcluded(row.id, $0) }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.checkbox)
                     }
+                } label: {
+                    Text(excludedCount == 0 ? "No apps excluded" : "\(excludedCount) excluded")
+                        .foregroundStyle(.secondary)
                 }
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 700)
+        .frame(width: 440, height: 660)
         .onAppear {
             status = SetupStatus.check()
             loadExclusions()
@@ -164,6 +190,10 @@ struct SettingsView: View {
             status = SetupStatus.check()
             loadExclusions()
         }
+    }
+
+    private var excludedCount: Int {
+        exclusionRows.filter(\.isExcluded).count
     }
 
     private func loadExclusions() {
@@ -228,26 +258,64 @@ private struct ExclusionRow: Identifiable {
     var isExcluded: Bool
 }
 
-
-private struct DistanceSlider: View {
+/// Discrete slider over an explicit catalog of allowed values. The stored
+/// value is matched to the catalog by nearest distance, never equality, so
+/// legacy continuous values and float drift both resolve to a valid notch.
+private struct NotchedSlider: View {
     let title: String
-    let subtitle: String
+    var subtitle: String? = nil
+    let values: [Double]
     @Binding var value: Double
-    let range: ClosedRange<Double>
+    let format: (Double) -> String
+    var minLabel = "Short"
+    var maxLabel = "Long"
+
+    private var nearestIndex: Int {
+        values.indices.min {
+            abs(values[$0] - value) < abs(values[$1] - value)
+        } ?? values.count / 2
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-            Slider(value: $value, in: range) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(format(value))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Slider(
+                value: Binding(
+                    get: { Double(nearestIndex) },
+                    set: { newIndex in
+                        let snapped = values[Int(newIndex.rounded())]
+                        if snapped != value {
+                            value = snapped
+                            NSHapticFeedbackManager.defaultPerformer
+                                .perform(.alignment, performanceTime: .now)
+                        }
+                    }
+                ),
+                in: 0...Double(values.count - 1),
+                step: 1
+            ) {
                 EmptyView()
             } minimumValueLabel: {
-                Text("Short").font(.caption).foregroundStyle(.secondary)
+                Text(minLabel).font(.caption).foregroundStyle(.secondary)
             } maximumValueLabel: {
-                Text("Long").font(.caption).foregroundStyle(.secondary)
+                Text(maxLabel).font(.caption).foregroundStyle(.secondary)
             }
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear {
+            // Snap legacy out-of-catalog values into the catalog once.
+            let snapped = values[nearestIndex]
+            if snapped != value { value = snapped }
         }
     }
 }

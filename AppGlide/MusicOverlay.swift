@@ -46,7 +46,7 @@ final class MusicOverlay {
     /// Fixed height for all states: keeps the stacking offset known before
     /// layout and avoids frame churn when the state flips mid-display.
     static let hudHeight: CGFloat = 128
-    private static let autoHideDelay: Duration = .seconds(2)
+    private static let autoHideDelay: Duration = .seconds(1.5)
 
     private let controller: MusicController
     private let model = MusicHUDModel()
