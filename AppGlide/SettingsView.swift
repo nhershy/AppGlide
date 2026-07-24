@@ -152,7 +152,23 @@ struct SettingsView: View {
                     }
             }
             Section("Excluded Apps") {
-                DisclosureGroup(isExpanded: $exclusionsExpanded) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        exclusionsExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(excludedCount == 0 ? "No apps excluded" : "^[\(excludedCount) app](inflect: true) excluded")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(exclusionsExpanded ? 90 : 0))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if exclusionsExpanded {
                     ForEach(exclusionRows) { row in
                         HStack {
                             if let icon = row.icon {
@@ -174,9 +190,6 @@ struct SettingsView: View {
                             .toggleStyle(.checkbox)
                         }
                     }
-                } label: {
-                    Text(excludedCount == 0 ? "No apps excluded" : "\(excludedCount) excluded")
-                        .foregroundStyle(.secondary)
                 }
             }
         }
